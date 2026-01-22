@@ -9,6 +9,17 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    emptyOutDir: true
-  }
+    emptyOutDir: true,
+    // Важно для GitHub Pages
+    rollupOptions: {
+      input: {
+        main: './index.html',
+        login: './login.html',
+        donate: './donate.html',
+        dashboard: './dashboard.html'
+      }
+    }
+  },
+  // Эта настройка критически важна для GitHub Pages
+  base: '/sbp-donations/'
 })
