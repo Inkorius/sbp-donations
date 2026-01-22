@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Поддержать стримера - SBP Donations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            color: #333;
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .donation-container {
+            max-width: 1000px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 768px) {
+            .donation-container {
+                flex-direction: row;
+                min-height: 600px;
+            }
+        }
+
+        .left-section {
+            background: linear-gradient(135deg, #7c4dff 0%, #651fff 100%);
+            color: white;
+            padding: 30px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .right-section {
+            padding: 30px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .streamer-info {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .streamer-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 4px solid white;
+            margin: 0 auto 15px;
+            background-color: #ddd;
+            overflow: hidden;
+        }
+
+        .streamer-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .streamer-name {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .streamer-description {
+            font-size: 1rem;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+
+        .qr-section {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            margin-bottom: 25px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .qr-title {
+            color: #7c4dff;
+            font-size: 1.4rem;
+            margin-bottom: 15px;
+            font-weight: 600;
+        }
+
+        .qr-code-container {
+            margin: 0 auto 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            display: inline-block;
+            border: 1px solid #e0e0e0;
+        }
+
+        .qr-code-container img {
+            max-width: 250px;
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .instructions {
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin-top: 15px;
+        }
+
+        .donation-form {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        .form-title {
+            color: #7c4dff;
+            font-size: 1.4rem;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s;
+            background: white;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            border-color: #7c4dff;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(124, 77, 255, 0.2);
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .submit-btn {
+            background: linear-gradient(135deg, #7c4dff 0%, #651fff 100%);
+            color: white;
+            border: none;
+            padding: 16px;
+            border-radius: 10px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            width: 100%;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 7px 14px rgba(124, 77, 255, 0.4);
+        }
+
+        .submit-btn:active {
+            transform: translateY(0);
+        }
+
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            text-align: center;
+            display: none;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #7c4dff;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .logo h1 {
+            color: white;
+            font-size: 1.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .heart {
+            color: #ff4081;
+        }
+
+        .steps {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .step {
+            text-align: center;
+            flex: 1;
+            min-width: 120px;
+            margin: 10px;
+        }
+
+        .step-number {
+            background: white;
+            color: #7c4dff;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 10px;
+            font-weight: bold;
+        }
+
+        .step-text {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+
+        @media (max-width: 767px) {
+            .donation-container {
+                margin: 10px;
+            }
+            
+            .left-section, .right-section {
+                padding: 20px;
+            }
+            
+            .streamer-name {
+                font-size: 1.5rem;
+            }
+            
+            .steps {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .step {
+                margin-bottom: 20px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+            
+            .left-section, .right-section {
+                padding: 15px;
+            }
+            
+            .qr-code-container img {
+                max-width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="donation-container">
+        <div class="left-section">
+            <div class="logo">
+                <h1><span class="heart">❤</span> SBP Donations</h1>
+                <p class="streamer-description">Поддержка стримера напрямую</p>
+            </div>
+            
+            <div class="streamer-info">
+                <div class="streamer-avatar" id="streamer-avatar">
+                    <!-- Аватар будет загружен через JS -->
+                </div>
+                <h2 class="streamer-name" id="streamer-name">Загрузка...</h2>
+                <p class="streamer-description" id="streamer-description">Спасибо за вашу поддержку!</p>
+            </div>
+            
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <div class="step-text">Отсканируйте QR-код в СберБанк Онлайн</div>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <div class="step-text">Введите сумму и комментарий</div>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <div class="step-text">Нажмите "Уведомить стримера"</div>
+                </div>
+            </div>
+            
+            <a href="/" class="back-link">← На главную</a>
+        </div>
+        
+        <div class="right-section">
+            <div class="qr-section">
+                <h3 class="qr-title">QR-код для перевода</h3>
+                <div class="qr-code-container" id="qr-code-container">
+                    <!-- QR-код будет загружен через JS -->
+                    <p id="qr-placeholder">QR-код загружается...</p>
+                </div>
+                <p class="instructions">
+                    📱 Откройте <strong>СберБанк Онлайн</strong> и наведите камеру на QR-код<br>
+                    💳 Или введите номер телефона вручную
+                </p>
+            </div>
+            
+            <div class="donation-form">
+                <h3 class="form-title">Уведомить о переводе</h3>
+                <form id="donation-form">
+                    <div class="form-group">
+                        <label for="donor-name">Ваше имя или никнейм *</label>
+                        <input type="text" id="donor-name" placeholder="Как к вам обращаться?" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="amount">Сумма перевода (₽) *</label>
+                        <input type="number" id="amount" min="10" step="1" placeholder="Например: 100" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="message">Сообщение для стримера</label>
+                        <textarea id="message" placeholder="Напишите что-нибудь приятное..."></textarea>
+                    </div>
+                    
+                    <button type="submit" class="submit-btn">
+                        📢 Уведомить стримера о переводе
+                    </button>
+                </form>
+                
+                <div class="success-message" id="success-message">
+                    ✅ Спасибо! Стример получил уведомление о вашем переводе.
+                </div>
+                
+                <div class="error-message" id="error-message">
+                    ❌ Произошла ошибка. Пожалуйста, попробуйте ещё раз.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { supabase } from './src/lib/supabase.js'
+        
+        // Получаем параметры из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const username = urlParams.get('user');
+        const userId = urlParams.get('id');
+        
+        // Элементы DOM
+        const streamerNameEl = document.getElementById('streamer-name');
+        const streamerAvatarEl = document.getElementById('streamer-avatar');
+        const streamerDescriptionEl = document.getElementById('streamer-description');
+        const qrCodeContainerEl = document.getElementById('qr-code-container');
+        const donationFormEl = document.getElementById('donation-form');
+        const successMessageEl = document.getElementById('success-message');
+        const errorMessageEl = document.getElementById('error-message');
+        const qrSection = document.querySelector('.qr-section');
+        const donationFormSection = document.querySelector('.donation-form');
+        
+        // Если нет ни username, ни userId, показываем сообщение
+        if (!username && !userId) {
+            showNoStreamerMessage();
+        } else {
+            loadStreamerData();
+        }
+        
+        // Функция показа сообщения, когда стример не указан
+        function showNoStreamerMessage() {
+            qrSection.style.display = 'none';
+            donationFormSection.style.display = 'none';
+            
+            streamerNameEl.textContent = 'Стример не указан';
+            streamerDescriptionEl.textContent = 'Используйте ссылку, предоставленную стримером';
+            
+            streamerAvatarEl.innerHTML = `
+                <div style="width:100%;height:100%;background:#7c4dff;display:flex;align-items:center;justify-content:center;color:white;font-size:2.5rem;">
+                    ?
+                </div>
+            `;
+            
+            // Показываем инструкцию
+            const instructions = document.createElement('div');
+            instructions.innerHTML = `
+                <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px; margin-top: 20px;">
+                    <h3>Как поддержать стримера?</h3>
+                    <p>1. Получите уникальную ссылку от стримера</p>
+                    <p>2. Перейдите по этой ссылке</p>
+                    <p>3. Отсканируйте QR-код и сделайте перевод</p>
+                    <p>4. Уведомите стримера о переводе через форму</p>
+                </div>
+            `;
+            document.querySelector('.left-section').appendChild(instructions);
+        }
+        
+        // Загружаем данные стримера
+        async function loadStreamerData() {
+            try {
+                let profile = null;
+                
+                if (username) {
+                    // Ищем по username
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('username', username)
+                        .single();
+                    
+                    if (error) {
+                        throw new Error(`Пользователь с именем "${username}" не найден`);
+                    }
+                    profile = data;
+                } else if (userId) {
+                    // Ищем по id
+                    const { data, error } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', userId)
+                        .single();
+                    
+                    if (error) {
+                        throw new Error(`Пользователь с ID "${userId}" не найден`);
+                    }
+                    profile = data;
+                }
+                
+                if (profile) {
+                    // Обновляем информацию о стримере
+                    streamerNameEl.textContent = profile.display_name || profile.username;
+                    streamerDescriptionEl.textContent = profile.description || 'Спасибо за вашу поддержку!';
+                    
+                    // Загружаем QR-код если есть
+                    if (profile.sber_qr_url) {
+                        qrCodeContainerEl.innerHTML = `<img src="${profile.sber_qr_url}" alt="QR-код СБП" crossorigin="anonymous">`;
+                    } else {
+                        qrCodeContainerEl.innerHTML = '<p>QR-код не настроен</p>';
+                    }
+                    
+                    // Устанавливаем аватар
+                    if (profile.avatar_url) {
+                        streamerAvatarEl.innerHTML = `<img src="${profile.avatar_url}" alt="${profile.username}">`;
+                    } else {
+                        // Генерируем аватар с инициалами
+                        const initials = profile.username.charAt(0).toUpperCase();
+                        const colors = ['#7c4dff', '#651fff', '#ff4081', '#00bcd4', '#4caf50'];
+                        const color = colors[profile.username.length % colors.length];
+                        streamerAvatarEl.innerHTML = `
+                            <div style="width:100%;height:100%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:2.5rem;">
+                                ${initials}
+                            </div>
+                        `;
+                    }
+                    
+                    // Сохраняем ID профиля для формы
+                    donationFormEl.dataset.profileId = profile.id;
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки данных стримера:', error);
+                streamerNameEl.textContent = 'Ошибка загрузки';
+                streamerDescriptionEl.textContent = error.message || 'Не удалось загрузить данные стримера';
+                qrCodeContainerEl.innerHTML = '<p>Не удалось загрузить данные</p>';
+            }
+        }
+        
+        // Обработка формы доната
+        donationFormEl.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const donorName = document.getElementById('donor-name').value.trim();
+            const amount = parseFloat(document.getElementById('amount').value);
+            const message = document.getElementById('message').value.trim();
+            
+            if (!donorName || !amount || amount < 10) {
+                showMessage('Пожалуйста, заполните все обязательные поля корректно (минимальная сумма 10₽)', 'error');
+                return;
+            }
+            
+            // Проверяем, загружен ли профиль
+            const profileId = donationFormEl.dataset.profileId;
+            if (!profileId) {
+                showMessage('Не удалось определить стримера. Пожалуйста, обновите страницу.', 'error');
+                return;
+            }
+            
+            try {
+                // Создаём запись о донате
+                const { error } = await supabase
+                    .from('donations')
+                    .insert({
+                        profile_id: profileId,
+                        donor_name: donorName,
+                        amount: amount,
+                        donor_message: message || null,
+                        status: 'pending'
+                    });
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Показываем сообщение об успехе
+                showMessage('Спасибо! Стример получил уведомление о вашем переводе.', 'success');
+                
+                // Очищаем форму
+                donationFormEl.reset();
+                
+                // Скрываем сообщение через 5 секунд
+                setTimeout(() => {
+                    hideMessages();
+                }, 5000);
+                
+            } catch (error) {
+                console.error('Ошибка отправки доната:', error);
+                showMessage('Произошла ошибка при отправке. Пожалуйста, попробуйте ещё раз.', 'error');
+            }
+        });
+        
+        // Функции для показа/скрытия сообщений
+        function showMessage(text, type) {
+            hideMessages();
+            
+            if (type === 'success') {
+                successMessageEl.textContent = text;
+                successMessageEl.style.display = 'block';
+            } else {
+                errorMessageEl.textContent = text;
+                errorMessageEl.style.display = 'block';
+            }
+        }
+        
+        function hideMessages() {
+            successMessageEl.style.display = 'none';
+            errorMessageEl.style.display = 'none';
+        }
+    </script>
+</body>
+</html>

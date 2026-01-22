@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Панель управления - SBP Donations</title>
+    <style>
+        body { font-family: Arial; padding: 20px; max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9; }
+        button { padding: 10px 20px; margin: 5px; background: #7c4dff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #651fff; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .donate-link { 
+            background: #f0f0f0; 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin: 10px 0;
+            font-family: monospace;
+            word-break: break-all;
+            font-size: 16px;
+        }
+        .copy-btn { background: #4CAF50; }
+        .copy-btn.copied { background: #2196F3; }
+        .qr-preview img { max-width: 200px; margin-top: 10px; border: 1px solid #ccc; }
+        .status-pending { color: #ff9800; }
+        .status-confirmed { color: #4CAF50; }
+        .status-rejected { color: #f44336; }
+        .stats { display: flex; gap: 20px; margin: 20px 0; }
+        .stat-box { flex: 1; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .stat-value { font-size: 24px; font-weight: bold; color: #7c4dff; }
+        .stat-label { color: #666; font-size: 14px; }
+        h1 { color: #333; }
+        h2 { color: #444; margin-top: 0; }
+        .logout-btn { background: #f44336; float: right; }
+        .logout-btn:hover { background: #d32f2f; }
+        .user-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+    </style>
+</head>
+<body>
+    <div class="user-header">
+        <h1>Панель управления SBP Donations</h1>
+        <button class="logout-btn" onclick="logout()">Выйти</button>
+    </div>
+
+    <div class="section">
+        <h2>Ваш профиль</h2>
+        <div id="profile-info">Загрузка...</div>
+        <button id="refresh-profile-btn">Обновить профиль</button>
+    </div>
+
+    <div class="stats" id="stats">
+        <div class="stat-box">
+            <div class="stat-value" id="total-donations">0</div>
+            <div class="stat-label">Всего донатов</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="total-amount">0 ₽</div>
+            <div class="stat-label">Общая сумма</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value" id="pending-donations">0</div>
+            <div class="stat-label">Ожидают подтверждения</div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Загрузить QR-код СБП</h2>
+        <p>Загрузите изображение вашего QR-кода от Сбербанка (JPG, PNG, до 2MB):</p>
+        <input type="file" id="qr-upload" accept="image/jpeg,image/png,image/jpg,image/webp">
+        <button id="upload-qr-btn">Загрузить QR-код</button>
+        <div id="qr-preview" class="qr-preview"></div>
+        <div id="upload-status" style="margin-top: 10px;"></div>
+    </div>
+
+    <div class="section">
+        <h2>Ваша ссылка для донатов</h2>
+        <div id="donate-link-container" style="display: none;">
+            <p>Поделитесь этой ссылкой со зрителями:</p>
+            <div class="donate-link" id="donate-link"></div>
+            <button id="copy-link-btn" class="copy-btn">Скопировать ссылку</button>
+            <span id="copy-status" style="margin-left: 10px;"></span>
+        </div>
+        <div id="no-username" style="display: none; color: #f44336; padding: 10px; background: #ffebee; border-radius: 4px;">
+            У вас не установлен username. Загрузите QR-код, и username будет создан автоматически.
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Последние донаты</h2>
+        <div id="donations-list">
+            <p>Загрузка донатов...</p>
+        </div>
+        <button id="load-donations-btn">Обновить список</button>
+        <button id="confirm-all-btn" style="background: #4CAF50; display: none;">Подтвердить все ожидающие</button>
+    </div>
+
+    <script type="module">
+        import { supabase } from './src/lib/supabase.js'
+        
+        // Элементы DOM
+        const profileInfoEl = document.getElementById('profile-info')
+        const refreshProfileBtn = document.getElementById('refresh-profile-btn')
+        const statsEl = document.getElementById('stats')
+        const donateLinkContainer = document.getElementById('donate-link-container')
+        const donateLinkEl = document.getElementById('donate-link')
+        const noUsernameEl = document.getElementById('no-username')
+        const qrUploadInput = document.getElementById('qr-upload')
+        const uploadBtn = document.getElementById('upload-qr-btn')
+        const qrPreviewEl = document.getElementById('qr-preview')
+        const uploadStatusEl = document.getElementById('upload-status')
+        const donationsListEl = document.getElementById('donations-list')
+        const loadDonationsBtn = document.getElementById('load-donations-btn')
+        const confirmAllBtn = document.getElementById('confirm-all-btn')
+        const copyLinkBtn = document.getElementById('copy-link-btn')
+        const copyStatusEl = document.getElementById('copy-status')
+        const totalDonationsEl = document.getElementById('total-donations')
+        const totalAmountEl = document.getElementById('total-amount')
+        const pendingDonationsEl = document.getElementById('pending-donations')
+        
+        // Текущий пользователь и профиль
+        let currentUser = null
+        let currentProfile = null
+        
+        // Инициализация
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Проверяем авторизацию
+            const { data: { user }, error } = await supabase.auth.getUser()
+            if (!user || error) {
+                window.location.href = '/login.html'
+                return
+            }
+            
+            currentUser = user
+            console.log('Текущий пользователь:', user.email)
+            
+            // Загружаем начальные данные
+            await loadProfile()
+            await loadDonations()
+            await loadStats()
+            
+            // Назначаем обработчики событий
+            refreshProfileBtn.addEventListener('click', loadProfile)
+            loadDonationsBtn.addEventListener('click', loadDonations)
+            uploadBtn.addEventListener('click', uploadQR)
+            copyLinkBtn.addEventListener('click', copyDonateLink)
+            confirmAllBtn.addEventListener('click', confirmAllPending)
+            
+            // Автоматическое обновление
+            setInterval(loadDonations, 30000)
+            setInterval(loadStats, 30000)
+        })
+        
+        // Загружаем профиль пользователя
+        async function loadProfile() {
+            try {
+                console.log('Загрузка профиля для пользователя:', currentUser.id)
+                
+                // Сначала пробуем получить профиль
+                let { data: profile, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', currentUser.id)
+                    .single()
+                
+                // Если профиля нет, создаём его
+                if (error) {
+                    console.log('Профиль не найден, создаём новый...')
+                    
+                    // Создаём username из email
+                    const username = currentUser.email.split('@')[0]
+                    
+                    // Создаём новый профиль
+                    const { data: newProfile, error: createError } = await supabase
+                        .from('profiles')
+                        .insert([
+                            {
+                                id: currentUser.id,
+                                username: username,
+                                display_name: username
+                            }
+                        ])
+                        .select()
+                        .single()
+                    
+                    if (createError) {
+                        console.error('Ошибка создания профиля:', createError)
+                        profileInfoEl.innerHTML = `<p style="color: red;">Ошибка создания профиля: ${createError.message}</p>`
+                        return
+                    }
+                    
+                    profile = newProfile
+                    console.log('Создан новый профиль:', profile)
+                }
+                
+                currentProfile = profile
+                
+                // Отображаем информацию о профиле
+                profileInfoEl.innerHTML = `
+                    <p><strong>Email:</strong> ${currentUser.email}</p>
+                    <p><strong>Имя пользователя:</strong> ${profile.username || 'Не указано'}</p>
+                    <p><strong>QR-код:</strong> ${profile.sber_qr_url ? 'Загружен' : 'Не загружен'}</p>
+                `
+                
+                // Показываем QR-код если есть
+                if (profile.sber_qr_url) {
+                    qrPreviewEl.innerHTML = `
+                        <img src="${profile.sber_qr_url}" alt="QR-код СБП">
+                        <p>QR-код загружен</p>
+                    `
+                } else {
+                    qrPreviewEl.innerHTML = '<p>QR-код не загружен</p>'
+                }
+                
+                // Показываем ссылку для донатов, если есть username
+                if (profile.username) {
+                    const donateLink = `${window.location.origin}/donate.html?user=${profile.username}`
+                    donateLinkEl.textContent = donateLink
+                    donateLinkContainer.style.display = 'block'
+                    noUsernameEl.style.display = 'none'
+                } else {
+                    donateLinkContainer.style.display = 'none'
+                    noUsernameEl.style.display = 'block'
+                }
+                
+                console.log('Профиль загружен:', profile)
+                
+            } catch (error) {
+                console.error('Ошибка в loadProfile:', error)
+                profileInfoEl.innerHTML = `<p style="color: red;">Ошибка загрузки профиля: ${error.message}</p>`
+            }
+        }
+        
+        // Загружаем статистику
+        async function loadStats() {
+            try {
+                const { data: donations, error } = await supabase
+                    .from('donations')
+                    .select('amount, status')
+                    .eq('profile_id', currentUser.id)
+                
+                if (error) {
+                    console.error('Ошибка загрузки статистики:', error)
+                    return
+                }
+                
+                if (donations) {
+                    const total = donations.length
+                    const totalAmount = donations.reduce((sum, d) => sum + parseFloat(d.amount || 0), 0)
+                    const pending = donations.filter(d => d.status === 'pending').length
+                    
+                    totalDonationsEl.textContent = total
+                    totalAmountEl.textContent = totalAmount.toFixed(2) + ' ₽'
+                    pendingDonationsEl.textContent = pending
+                    
+                    // Показываем/скрываем кнопку подтверждения
+                    confirmAllBtn.style.display = pending > 0 ? 'inline-block' : 'none'
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки статистики:', error)
+            }
+        }
+        
+        // Загрузка QR-кода
+        async function uploadQR() {
+            const file = qrUploadInput.files[0]
+            if (!file) {
+                alert('Выберите файл с QR-кодом')
+                return
+            }
+            
+            // Проверяем тип файла
+            const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+            if (!allowedTypes.includes(file.type)) {
+                alert('Пожалуйста, выберите изображение (JPG, PNG, WebP)')
+                return
+            }
+            
+            // Проверяем размер файла (макс 2MB)
+            const maxSize = 2 * 1024 * 1024
+            if (file.size > maxSize) {
+                alert('Файл слишком большой. Максимальный размер: 2MB')
+                return
+            }
+            
+            uploadBtn.disabled = true
+            uploadBtn.textContent = 'Загрузка...'
+            uploadStatusEl.textContent = 'Загрузка файла...'
+            uploadStatusEl.style.color = '#ff9800'
+            
+            try {
+                console.log('Начало загрузки QR-кода...')
+                
+                // Генерируем уникальное имя файла
+                const timestamp = Date.now()
+                const random = Math.random().toString(36).substring(7)
+                const fileName = `${currentUser.id}_${timestamp}_${random}.${file.name.split('.').pop()}`
+                
+                console.log('Имя файла:', fileName)
+                
+                // Загружаем в хранилище
+                const { error: uploadError } = await supabase.storage
+                    .from('qr-codes')
+                    .upload(fileName, file)
+                
+                if (uploadError) {
+                    console.error('Ошибка загрузки в хранилище:', uploadError)
+                    throw new Error(`Ошибка загрузки: ${uploadError.message}`)
+                }
+                
+                console.log('Файл загружен в хранилище')
+                
+                // Получаем публичный URL
+                const { data: { publicUrl } } = supabase.storage
+                    .from('qr-codes')
+                    .getPublicUrl(fileName)
+                
+                console.log('Публичный URL:', publicUrl)
+                
+                // Обновляем профиль
+                const { error: updateError } = await supabase
+                    .from('profiles')
+                    .update({ sber_qr_url: publicUrl })
+                    .eq('id', currentUser.id)
+                
+                if (updateError) {
+                    console.error('Ошибка обновления профиля:', updateError)
+                    
+                    // Если ошибка из-за отсутствия столбца, создаём его
+                    if (updateError.message.includes('sber_qr_url')) {
+                        alert('Ошибка: столбец sber_qr_url не найден в таблице profiles. Нужно добавить его в базу данных.')
+                        return
+                    }
+                    
+                    throw new Error(`Ошибка обновления профиля: ${updateError.message}`)
+                }
+                
+                console.log('Профиль обновлён')
+                
+                // Показываем успех
+                uploadStatusEl.textContent = '✅ QR-код успешно загружен!'
+                uploadStatusEl.style.color = '#4CAF50'
+                
+                qrPreviewEl.innerHTML = `
+                    <img src="${publicUrl}" alt="QR-код СБП">
+                    <p>QR-код загружен</p>
+                `
+                
+                // Обновляем профиль
+                await loadProfile()
+                
+                console.log('QR-код загружен успешно')
+                
+            } catch (error) {
+                console.error('Ошибка загрузки QR:', error)
+                uploadStatusEl.textContent = `❌ ${error.message}`
+                uploadStatusEl.style.color = '#f44336'
+            } finally {
+                uploadBtn.disabled = false
+                uploadBtn.textContent = 'Загрузить QR-код'
+                qrUploadInput.value = ''
+            }
+        }
+        
+        // Загружаем донаты
+        async function loadDonations() {
+            try {
+                const { data: donations, error } = await supabase
+                    .from('donations')
+                    .select('*')
+                    .eq('profile_id', currentUser.id)
+                    .order('created_at', { ascending: false })
+                    .limit(20)
+                
+                if (error) {
+                    console.error('Ошибка загрузки донатов:', error)
+                    donationsListEl.innerHTML = '<p>Ошибка загрузки донатов</p>'
+                    return
+                }
+                
+                if (!donations || donations.length === 0) {
+                    donationsListEl.innerHTML = '<p>Донатов пока нет</p>'
+                    return
+                }
+                
+                let html = '<table>'
+                html += '<tr><th>Дата</th><th>Имя</th><th>Сумма</th><th>Сообщение</th><th>Статус</th><th>Действия</th></tr>'
+                
+                donations.forEach(d => {
+                    const date = new Date(d.created_at).toLocaleString('ru-RU')
+                    const statusClass = `status-${d.status}`
+                    
+                    html += `
+                        <tr>
+                            <td>${date}</td>
+                            <td>${d.donor_name}</td>
+                            <td>${d.amount} ₽</td>
+                            <td>${d.donor_message || '-'}</td>
+                            <td class="${statusClass}">${getStatusText(d.status)}</td>
+                            <td>
+                                ${d.status === 'pending' ? `
+                                    <button onclick="confirmDonation('${d.id}')" style="background: #4CAF50; padding: 5px 10px;">Подтвердить</button>
+                                    <button onclick="rejectDonation('${d.id}')" style="background: #f44336; padding: 5px 10px;">Отклонить</button>
+                                ` : '—'}
+                            </td>
+                        </tr>
+                    `
+                })
+                
+                html += '</table>'
+                donationsListEl.innerHTML = html
+                
+            } catch (error) {
+                console.error('Ошибка загрузки донатов:', error)
+                donationsListEl.innerHTML = '<p>Ошибка загрузки донатов</p>'
+            }
+        }
+        
+        // Функции для работы со статусами
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': 'Ожидает',
+                'confirmed': 'Подтверждён',
+                'rejected': 'Отклонён',
+                'refunded': 'Возвращён'
+            }
+            return statusMap[status] || status
+        }
+        
+        async function confirmDonation(donationId) {
+            if (confirm('Подтвердить получение доната?')) {
+                const { error } = await supabase
+                    .from('donations')
+                    .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
+                    .eq('id', donationId)
+                
+                if (error) {
+                    alert('Ошибка подтверждения: ' + error.message)
+                } else {
+                    await loadDonations()
+                    await loadStats()
+                }
+            }
+        }
+        
+        async function rejectDonation(donationId) {
+            if (confirm('Отклонить этот донат?')) {
+                const { error } = await supabase
+                    .from('donations')
+                    .update({ status: 'rejected' })
+                    .eq('id', donationId)
+                
+                if (error) {
+                    alert('Ошибка отклонения: ' + error.message)
+                } else {
+                    await loadDonations()
+                    await loadStats()
+                }
+            }
+        }
+        
+        async function confirmAllPending() {
+            if (confirm('Подтвердить все ожидающие донаты?')) {
+                const { error } = await supabase
+                    .from('donations')
+                    .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
+                    .eq('profile_id', currentUser.id)
+                    .eq('status', 'pending')
+                
+                if (error) {
+                    alert('Ошибка: ' + error.message)
+                } else {
+                    await loadDonations()
+                    await loadStats()
+                }
+            }
+        }
+        
+        // Копирование ссылки
+        async function copyDonateLink() {
+            const link = donateLinkEl.textContent
+            try {
+                await navigator.clipboard.writeText(link)
+                copyLinkBtn.textContent = 'Скопировано!'
+                copyLinkBtn.classList.add('copied')
+                copyStatusEl.textContent = '✓'
+                copyStatusEl.style.color = '#4CAF50'
+                
+                setTimeout(() => {
+                    copyLinkBtn.textContent = 'Скопировать ссылку'
+                    copyLinkBtn.classList.remove('copied')
+                    copyStatusEl.textContent = ''
+                }, 2000)
+            } catch (err) {
+                console.error('Ошибка копирования:', err)
+                alert('Не удалось скопировать ссылку')
+            }
+        }
+        
+        // Выход из системы
+        async function logout() {
+            await supabase.auth.signOut()
+            window.location.href = '/login.html'
+        }
+        
+        // Экспортируем функции для использования в onclick
+        window.confirmDonation = confirmDonation
+        window.rejectDonation = rejectDonation
+        window.logout = logout
+        
+        // Добавляем глобальную функцию для отладки
+        window.debugProfile = async () => {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', currentUser.id)
+                .single()
+            console.log('Профиль:', profile)
+            alert(`Профиль: ${JSON.stringify(profile, null, 2)}`)
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Вход - SBP Donations</title>
+    <style>
+        body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        input { width: 100%; padding: 8px; margin-top: 5px; }
+        button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+        .error { color: red; margin-top: 10px; }
+        .success { color: green; }
+    </style>
+</head>
+<body>
+    <h2 id="form-title">Вход</h2>
+    <div id="message"></div>
+    
+    <form id="auth-form">
+        <div class="form-group">
+            <label>Email:</label>
+            <input type="email" id="email" required>
+        </div>
+        <div class="form-group">
+            <label>Пароль:</label>
+            <input type="password" id="password" required minlength="6">
+        </div>
+        <button type="submit" id="submit-btn">Войти</button>
+    </form>
+    
+    <button id="switch-btn" style="margin-top: 15px; background: #666;">
+        Нет аккаунта? Зарегистрироваться
+    </button>
+    
+    <script type="module">
+        import { supabase } from './src/lib/supabase.js'
+        
+        let isRegister = false
+        const form = document.getElementById('auth-form')
+        const switchBtn = document.getElementById('switch-btn')
+        const title = document.getElementById('form-title')
+        const submitBtn = document.getElementById('submit-btn')
+        const messageDiv = document.getElementById('message')
+        
+        // Переключение между входом и регистрацией
+        switchBtn.onclick = () => {
+            isRegister = !isRegister
+            title.textContent = isRegister ? 'Регистрация' : 'Вход'
+            submitBtn.textContent = isRegister ? 'Зарегистрироваться' : 'Войти'
+            switchBtn.textContent = isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'
+            messageDiv.textContent = ''
+        }
+        
+        // Обработка формы
+        form.onsubmit = async (e) => {
+            e.preventDefault()
+            const email = document.getElementById('email').value
+            const password = document.getElementById('password').value
+            
+            messageDiv.className = ''
+            messageDiv.textContent = 'Обработка...'
+            
+            try {
+                if (isRegister) {
+                    // Регистрация
+                    const { data, error } = await supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            data: { username: email.split('@')[0] }
+                        }
+                    })
+                    
+                    if (error) throw error
+                    messageDiv.className = 'success'
+                    messageDiv.textContent = 'Регистрация успешна! Проверьте почту для подтверждения.'
+                    form.reset()
+                } else {
+                    // Вход
+                    const { data, error } = await supabase.auth.signInWithPassword({
+                        email,
+                        password
+                    })
+                    
+                    if (error) throw error
+                    messageDiv.className = 'success'
+                    messageDiv.textContent = 'Вход успешен! Перенаправляем...'
+                    setTimeout(() => window.location.href = '/dashboard.html', 1000)
+                }
+            } catch (error) {
+                messageDiv.className = 'error'
+                messageDiv.textContent = `Ошибка: ${error.message}`
+            }
+        }
+    </script>
+</body>
+</html>
