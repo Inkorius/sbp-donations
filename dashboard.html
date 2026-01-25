@@ -214,8 +214,10 @@
                 }
                 
                 // Показываем ссылку для донатов, если есть username
+                // Показываем ссылку для донатов, если есть username
                 if (profile.username) {
-                    const donateLink = `${window.location.origin}/donate.html?user=${profile.username}`
+                    const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+                    const donateLink = `${window.location.origin}${basePath}/donate.html?user=${profile.username}`
                     donateLinkEl.textContent = donateLink
                     donateLinkContainer.style.display = 'block'
                     noUsernameEl.style.display = 'none'
