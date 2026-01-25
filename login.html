@@ -85,7 +85,8 @@
                     if (error) throw error
                     messageDiv.className = 'success'
                     messageDiv.textContent = 'Вход успешен! Перенаправляем...'
-                    setTimeout(() => window.location.href = '/dashboard.html', 1000)
+                    const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+                    setTimeout(() => window.location.href = basePath + '/dashboard.html', 1000)
                 }
             } catch (error) {
                 messageDiv.className = 'error'

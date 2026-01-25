@@ -501,7 +501,8 @@
         // Выход из системы
         async function logout() {
             await supabase.auth.signOut()
-            window.location.href = '/login.html'
+            const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+            window.location.href = basePath + '/login.html'
         }
         
         // Экспортируем функции для использования в onclick
