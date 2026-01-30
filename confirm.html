@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <title>Подтверждение email - SBP Donations</title>
     <style>
+        /* Стили остаются без изменений */
         body { 
             font-family: Arial; 
             max-width: 600px; 
@@ -48,11 +49,13 @@
         <button id="go-to-dashboard" style="display: none;">Перейти в панель управления</button>
     </div>
 
-    <script type="module">
-        import { supabase } from './src/lib/supabase.js'
-        
-        // Объявляем асинхронную функцию для подтверждения email
-        async function handleEmailConfirmation() {
+    <!-- Подключаем Supabase через CDN -->
+    <script src="js/supabase-cdn.js"></script>
+    
+    <!-- Наш основной скрипт -->
+    <script>
+        // Ждем загрузки Supabase
+        document.addEventListener('supabase-loaded', async function() {
             // Получаем параметры из URL
             const urlParams = new URLSearchParams(window.location.search);
             const type = urlParams.get('type');
@@ -69,7 +72,7 @@
             if (type === 'signup' && token) {
                 // Пытаемся подтвердить email
                 try {
-                    const { data, error } = await supabase.auth.verifyOtp({
+                    const { data, error } = await window.supabase.auth.verifyOtp({
                         token_hash: token,
                         type: 'signup'
                     });
@@ -110,10 +113,7 @@
             }
             
             goToDashboardBtn.addEventListener('click', redirectToDashboard);
-        }
-        
-        // Запускаем обработку подтверждения email
-        handleEmailConfirmation();
+        });
     </script>
 </body>
 </html>

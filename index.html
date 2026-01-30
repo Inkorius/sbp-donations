@@ -3,6 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <title>SBP Donations - Главная</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #7c4dff; }
+        h2 { color: #651fff; margin-top: 30px; }
+        nav { margin: 20px 0; }
+        nav a { background: #7c4dff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-right: 10px; }
+        nav a:hover { background: #651fff; }
+        ul { margin-left: 20px; }
+        li { margin-bottom: 10px; }
+        .status { padding: 10px; border-radius: 5px; margin: 5px 0; }
+        .status-done { background: #d4edda; color: #155724; }
+        .status-dev { background: #fff3cd; color: #856404; }
+    </style>
 </head>
 <body>
     <h1>SBP Donations</h1>
@@ -22,10 +35,13 @@
     </ul>
     
     <h2>🔧 Статус системы:</h2>
-    <p>✅ Базовая система работает</p>
-    <p>✅ Авторизация и регистрация</p>
-    <p>✅ Загрузка QR-кодов</p>
-    <p>✅ Приём донатов</p>
-    <p>🔜 OBS интеграция (в разработке)</p>
+    <div class="status status-done">✅ Базовая система работает</div>
+    <div class="status status-done">✅ Авторизация и регистрация</div>
+    <div class="status status-done">✅ Загрузка QR-кодов</div>
+    <div class="status status-done">✅ Приём донатов</div>
+    <div class="status status-dev">🔜 OBS интеграция (в разработке)</div>
+
+    <!-- Подключаем Supabase через CDN -->
+    <script src="js/supabase-cdn.js"></script>
 </body>
 </html>

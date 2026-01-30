@@ -31,10 +31,11 @@
     <button id="switch-btn" style="margin-top: 15px; background: #666;">
         Нет аккаунта? Зарегистрироваться
     </button>
+
+    <!-- Подключаем Supabase через CDN -->
+    <script src="js/supabase-cdn.js"></script>
     
-    <script type="module">
-        import { supabase } from './src/lib/supabase.js'
-        
+    <script>
         let isRegister = false
         const form = document.getElementById('auth-form')
         const switchBtn = document.getElementById('switch-btn')
@@ -62,26 +63,26 @@
             
             try {
                 if (isRegister) {
-                // Регистрация
-                const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-                const redirectTo = window.location.origin + basePath + '/dashboard.html';
+                    // Регистрация
+                    const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+                    const redirectTo = window.location.origin + basePath + '/dashboard.html';
 
-                const { data, error } = await supabase.auth.signUp({
-                    email,
-                    password,
-                    options: {
-                        data: { username: email.split('@')[0] },
-                        emailRedirectTo: redirectTo
-                    }
-                })
-                    
+                    const { data, error } = await window.supabase.auth.signUp({
+                        email,
+                        password,
+                        options: {
+                            data: { username: email.split('@')[0] },
+                            emailRedirectTo: redirectTo
+                        }
+                    })
+                        
                     if (error) throw error
                     messageDiv.className = 'success'
                     messageDiv.textContent = 'Регистрация успешна! Проверьте почту для подтверждения.'
                     form.reset()
                 } else {
                     // Вход
-                    const { data, error } = await supabase.auth.signInWithPassword({
+                    const { data, error } = await window.supabase.auth.signInWithPassword({
                         email,
                         password
                     })
