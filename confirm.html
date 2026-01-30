@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Подтверждение email - SBP Donations</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            max-width: 600px; 
+            margin: 100px auto; 
+            padding: 20px; 
+            text-align: center;
+            background: linear-gradient(135deg, #7c4dff 0%, #651fff 100%);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        .success { color: #4CAF50; font-size: 48px; margin-bottom: 20px; }
+        .error { color: #f44336; font-size: 48px; margin-bottom: 20px; }
+        button { 
+            padding: 12px 30px; 
+            background: white; 
+            color: #7c4dff; 
+            border: none; 
+            border-radius: 5px; 
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="message">
+            <div class="success" id="success-icon" style="display: none;">✓</div>
+            <div class="error" id="error-icon" style="display: none;">✗</div>
+            <h2 id="status-text">Проверка подтверждения...</h2>
+            <p id="status-details">Пожалуйста, подождите</p>
+        </div>
+        <button id="go-to-dashboard" style="display: none;">Перейти в панель управления</button>
+    </div>
+
+    <script type="module">
+        import { supabase } from './src/lib/supabase.js'
+        
+        // Получаем параметры из URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const type = urlParams.get('type');
+        const token = urlParams.get('token');
+        
+        const messageEl = document.getElementById('message');
+        const statusText = document.getElementById('status-text');
+        const statusDetails = document.getElementById('status-details');
+        const successIcon = document.getElementById('success-icon');
+        const errorIcon = document.getElementById('error-icon');
+        const goToDashboardBtn = document.getElementById('go-to-dashboard');
+        
+        // Проверяем, есть ли параметры подтверждения
+        if (type === 'signup' && token) {
+            // Пытаемся подтвердить email
+            try {
+                const { data, error } = await supabase.auth.verifyOtp({
+                    token_hash: token,
+                    type: 'signup'
+                });
+                
+                if (error) {
+                    showError(error.message);
+                } else {
+                    showSuccess();
+                }
+            } catch (error) {
+                showError(error.message);
+            }
+        } else {
+            showError('Неверная ссылка подтверждения');
+        }
+        
+        function showSuccess() {
+            successIcon.style.display = 'block';
+            statusText.textContent = 'Email успешно подтверждён!';
+            statusDetails.textContent = 'Теперь вы можете войти в панель управления';
+            goToDashboardBtn.style.display = 'inline-block';
+            
+            // Автоматический редирект через 5 секунд
+            setTimeout(() => {
+                redirectToDashboard();
+            }, 5000);
+        }
+        
+        function showError(errorMessage) {
+            errorIcon.style.display = 'block';
+            statusText.textContent = 'Ошибка подтверждения';
+            statusDetails.textContent = errorMessage || 'Ссылка недействительна или устарела';
+        }
+        
+        function redirectToDashboard() {
+            const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+            window.location.href = basePath + '/dashboard.html';
+        }
+        
+        goToDashboardBtn.addEventListener('click', redirectToDashboard);
+    </script>
+</body>
+</html>

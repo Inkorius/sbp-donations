@@ -62,14 +62,18 @@
             
             try {
                 if (isRegister) {
-                    // Регистрация
-                    const { data, error } = await supabase.auth.signUp({
-                        email,
-                        password,
-                        options: {
-                            data: { username: email.split('@')[0] }
-                        }
-                    })
+                // Регистрация
+                const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+                const redirectTo = window.location.origin + basePath + '/dashboard.html';
+
+                const { data, error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: { username: email.split('@')[0] },
+                        emailRedirectTo: redirectTo
+                    }
+                })
                     
                     if (error) throw error
                     messageDiv.className = 'success'

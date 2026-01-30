@@ -17,6 +17,7 @@ export default defineConfig({
         login: './login.html',
         donate: './donate.html',
         dashboard: './dashboard.html'
+        confirm: './confirm.html'
       }
     }
   },
