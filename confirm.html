@@ -51,63 +51,69 @@
     <script type="module">
         import { supabase } from './src/lib/supabase.js'
         
-        // Получаем параметры из URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const type = urlParams.get('type');
-        const token = urlParams.get('token');
-        
-        const messageEl = document.getElementById('message');
-        const statusText = document.getElementById('status-text');
-        const statusDetails = document.getElementById('status-details');
-        const successIcon = document.getElementById('success-icon');
-        const errorIcon = document.getElementById('error-icon');
-        const goToDashboardBtn = document.getElementById('go-to-dashboard');
-        
-        // Проверяем, есть ли параметры подтверждения
-        if (type === 'signup' && token) {
-            // Пытаемся подтвердить email
-            try {
-                const { data, error } = await supabase.auth.verifyOtp({
-                    token_hash: token,
-                    type: 'signup'
-                });
-                
-                if (error) {
-                    showError(error.message);
-                } else {
-                    showSuccess();
-                }
-            } catch (error) {
-                showError(error.message);
-            }
-        } else {
-            showError('Неверная ссылка подтверждения');
-        }
-        
-        function showSuccess() {
-            successIcon.style.display = 'block';
-            statusText.textContent = 'Email успешно подтверждён!';
-            statusDetails.textContent = 'Теперь вы можете войти в панель управления';
-            goToDashboardBtn.style.display = 'inline-block';
+        // Объявляем асинхронную функцию для подтверждения email
+        async function handleEmailConfirmation() {
+            // Получаем параметры из URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const type = urlParams.get('type');
+            const token = urlParams.get('token');
             
-            // Автоматический редирект через 5 секунд
-            setTimeout(() => {
-                redirectToDashboard();
-            }, 5000);
+            const messageEl = document.getElementById('message');
+            const statusText = document.getElementById('status-text');
+            const statusDetails = document.getElementById('status-details');
+            const successIcon = document.getElementById('success-icon');
+            const errorIcon = document.getElementById('error-icon');
+            const goToDashboardBtn = document.getElementById('go-to-dashboard');
+            
+            // Проверяем, есть ли параметры подтверждения
+            if (type === 'signup' && token) {
+                // Пытаемся подтвердить email
+                try {
+                    const { data, error } = await supabase.auth.verifyOtp({
+                        token_hash: token,
+                        type: 'signup'
+                    });
+                    
+                    if (error) {
+                        showError(error.message);
+                    } else {
+                        showSuccess();
+                    }
+                } catch (error) {
+                    showError(error.message);
+                }
+            } else {
+                showError('Неверная ссылка подтверждения');
+            }
+            
+            function showSuccess() {
+                successIcon.style.display = 'block';
+                statusText.textContent = 'Email успешно подтверждён!';
+                statusDetails.textContent = 'Теперь вы можете войти в панель управления';
+                goToDashboardBtn.style.display = 'inline-block';
+                
+                // Автоматический редирект через 5 секунд
+                setTimeout(() => {
+                    redirectToDashboard();
+                }, 5000);
+            }
+            
+            function showError(errorMessage) {
+                errorIcon.style.display = 'block';
+                statusText.textContent = 'Ошибка подтверждения';
+                statusDetails.textContent = errorMessage || 'Ссылка недействительна или устарела';
+            }
+            
+            function redirectToDashboard() {
+                const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
+                window.location.href = basePath + '/dashboard.html';
+            }
+            
+            goToDashboardBtn.addEventListener('click', redirectToDashboard);
         }
         
-        function showError(errorMessage) {
-            errorIcon.style.display = 'block';
-            statusText.textContent = 'Ошибка подтверждения';
-            statusDetails.textContent = errorMessage || 'Ссылка недействительна или устарела';
-        }
-        
-        function redirectToDashboard() {
-            const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-            window.location.href = basePath + '/dashboard.html';
-        }
-        
-        goToDashboardBtn.addEventListener('click', redirectToDashboard);
+        // Запускаем обработку подтверждения email
+        handleEmailConfirmation();
     </script>
 </body>
 </html>
