@@ -10,17 +10,31 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // Важно для GitHub Pages
     rollupOptions: {
       input: {
         main: './index.html',
         login: './login.html',
         donate: './donate.html',
-        dashboard: './dashboard.html'
+        dashboard: './dashboard.html',
         confirm: './confirm.html'
       }
     }
   },
-  // Эта настройка критически важна для GitHub Pages
-  base: '/sbp-donations/'
+  base: '/sbp-donations/',
+  // Указываем Vite обрабатывать все HTML файлы
+  plugins: [
+    {
+      name: 'html-transform',
+      transformIndexHtml(html) {
+        // Добавляем CDN скрипт Supabase в каждый HTML файл
+        return html.replace(
+          '</head>',
+          `
+          <!-- Supabase CDN -->
+          <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/+esm"></script>
+          </head>`
+        );
+      }
+    }
+  ]
 })
