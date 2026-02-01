@@ -400,7 +400,7 @@
                                 <td>${date}</td>
                                 <td>${d.donor_name}</td>
                                 <td>${d.amount} ₽</td>
-                                <td>${d.donor_message || '-'}</td>
+                                <td>${d.donor || '-'}</td>
                                 <td class="${statusClass}">${getStatusText(d.status)}</td>
                                 <td>
                                     ${d.status === 'pending' ? `
