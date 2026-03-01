@@ -1,26 +1,24 @@
-name: Keep Supabase Alive (Random)
+name: Keep Supabase Alive (Improved)
 
 on:
   schedule:
-    # Запуск каждый час
-    - cron: '0 * * * *'
-  workflow_dispatch:  # позволяет запускать вручную
+    - cron: '0 */3 * * *'   # каждые 3 часа (надёжнее, чем 1 раз в час с вероятностью)
+  workflow_dispatch:
 
 jobs:
-  random-ping:
+  ping:
     runs-on: ubuntu-latest
     steps:
-      # Генерация случайного числа от 0 до 7
-      - name: Generate random number
-        id: random
-        run: echo "value=$(( RANDOM % 8 ))" >> $GITHUB_OUTPUT
-
-      # Выполнение запроса только с вероятностью 1/8 (в среднем 3 раза в день)
-      - name: Ping Supabase with probability 1/8
-        if: steps.random.outputs.value == 0
+      - name: Ping Supabase (always succeed)
         env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          curl -s -o /dev/null -w "%{http_code}\n" \
-            https://rvbduwlfnhepnknrhtaz.supabase.co/rest/v1/ \
-            -H "apikey: ${SUPABASE_KEY}"
+          # Отправляем запрос, но игнорируем код ошибки (всегда завершаем с 0)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${SUPABASE_URL}/rest/v1/" \
+            -H "apikey: ${SUPABASE_KEY}" || echo "failed")
+          
+          echo "HTTP response code: $HTTP_CODE"
+          # Если хотите, можно сохранить результат в артефакт или отправить уведомление
+          # Но главное - команда всегда возвращает 0 (успех)
