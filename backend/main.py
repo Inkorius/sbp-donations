@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID
 
 import asyncpg
@@ -14,20 +15,44 @@ load_dotenv()
 
 pool: Optional[asyncpg.Pool] = None
 
+# Query keys that asyncpg must not pass as PostgreSQL SET parameters.
+_DSN_SSL_KEYS = {"ssl", "sslmode"}
 
-def database_url() -> str:
+
+def parse_database_url() -> tuple[str, bool | None]:
+    """Return (dsn, ssl). ssl is False when EasyPanel uses sslmode=disable."""
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
         raise RuntimeError("DATABASE_URL is required")
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://") :]
-    return url.replace("sslmode=disable", "ssl=disable")
+
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    sslmode = (query.get("sslmode") or query.get("ssl") or "").lower()
+
+    ssl: bool | None = None
+    if sslmode in {"disable", "false", "0"}:
+        ssl = False
+    elif sslmode in {"require", "verify-ca", "verify-full", "true", "1"}:
+        ssl = True
+
+    for key in list(query):
+        if key.lower() in _DSN_SSL_KEYS:
+            del query[key]
+
+    dsn = urlunparse(parsed._replace(query=urlencode(query)))
+    return dsn, ssl
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global pool
-    pool = await asyncpg.create_pool(database_url(), min_size=1, max_size=10)
+    dsn, ssl = parse_database_url()
+    pool_kwargs: dict = {"dsn": dsn, "min_size": 1, "max_size": 10}
+    if ssl is not None:
+        pool_kwargs["ssl"] = ssl
+    pool = await asyncpg.create_pool(**pool_kwargs)
     try:
         yield
     finally:
