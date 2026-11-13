@@ -162,9 +162,10 @@ SCHEMA_STATEMENTS = [
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # Existing profiles from the old app are kept. IF NOT EXISTS will not replace them.
     """
     CREATE TABLE IF NOT EXISTS profiles (
-      id           UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      id           UUID PRIMARY KEY,
       username     TEXT UNIQUE NOT NULL,
       display_name TEXT,
       description  TEXT,
@@ -174,6 +175,25 @@ SCHEMA_STATEMENTS = [
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS display_name TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS description TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sber_qr_url TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+    """
+    DO $$
+    DECLARE r record;
+    BEGIN
+      FOR r IN
+        SELECT c.conname
+        FROM pg_constraint c
+        JOIN pg_class t ON c.conrelid = t.oid
+        WHERE t.relname = 'profiles' AND c.contype = 'f'
+      LOOP
+        EXECUTE format('ALTER TABLE profiles DROP CONSTRAINT IF EXISTS %I', r.conname);
+      END LOOP;
+    END $$
+    """,
     """
     CREATE TABLE IF NOT EXISTS donations (
       id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -181,8 +201,7 @@ SCHEMA_STATEMENTS = [
       donor_name     TEXT NOT NULL,
       amount         NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
       message        TEXT,
-      status         TEXT NOT NULL DEFAULT 'pending'
-                     CHECK (status IN ('pending', 'confirmed', 'rejected', 'refunded')),
+      status         TEXT NOT NULL DEFAULT 'pending',
       payment_ref    TEXT,
       payment_source TEXT NOT NULL DEFAULT 'manual',
       matched_at     TIMESTAMPTZ,
@@ -190,6 +209,10 @@ SCHEMA_STATEMENTS = [
       created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS payment_ref TEXT",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS payment_source TEXT NOT NULL DEFAULT 'manual'",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS matched_at TIMESTAMPTZ",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
     """
     CREATE INDEX IF NOT EXISTS idx_donations_profile_created
       ON donations (profile_id, created_at DESC)
