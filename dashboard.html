@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Панель управления - SBP Donations</title>
+    <title data-i18n-title="dash.docTitle">Панель управления - SBP Donations</title>
     <style>
         body { font-family: Arial; padding: 20px; max-width: 1200px; margin: 0 auto; }
         .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background: #f9f9f9; }
@@ -89,7 +89,7 @@
             <span id="copy-status" style="margin-left: 10px;"></span>
         </div>
         <div id="no-username" style="display: none; color: #f44336; padding: 10px; background: #ffebee; border-radius: 4px;">
-            У вас не установлен username. Загрузите QR-код, и username будет создан автоматически.
+            <span data-i18n="dash.noUsername">У вас не установлен username.</span>
         </div>
     </div>
 
@@ -170,20 +170,20 @@
                     currentProfile = profile
                     
                     // Отображаем информацию о профиле
+                    const t = window.sbpI18n.t
                     profileInfoEl.innerHTML = `
-                        <p><strong>Email:</strong> ${currentUser.email}</p>
-                        <p><strong>Имя пользователя:</strong> ${profile.username || 'Не указано'}</p>
-                        <p><strong>QR-код:</strong> ${profile.sber_qr_url ? 'Загружен' : 'Не загружен'}</p>
+                        <p><strong>${t('dash.email')}:</strong> ${currentUser.email}</p>
+                        <p><strong>${t('dash.username')}:</strong> ${profile.username || t('dash.notSpecified')}</p>
+                        <p><strong>${t('dash.qr.status')}:</strong> ${profile.sber_qr_url ? t('dash.qr.yes') : t('dash.qr.no')}</p>
                     `
                     
-                    // Показываем QR-код если есть
                     if (profile.sber_qr_url) {
                         qrPreviewEl.innerHTML = `
-                            <img src="${profile.sber_qr_url}" alt="QR-код СБП">
-                            <p>QR-код загружен</p>
+                            <img src="${profile.sber_qr_url}" alt="QR">
+                            <p>${t('dash.qr.loaded')}</p>
                         `
                     } else {
-                        qrPreviewEl.innerHTML = '<p>QR-код не загружен</p>'
+                        qrPreviewEl.innerHTML = `<p>${t('dash.qr.missing')}</p>`
                     }
                     
                     // Показываем ссылку для донатов, если есть username
@@ -233,27 +233,27 @@
             async function uploadQR() {
                 const file = qrUploadInput.files[0]
                 if (!file) {
-                    alert('Выберите файл с QR-кодом')
+                    alert(window.sbpI18n.t('dash.qr.choose'))
                     return
                 }
                 
                 // Проверяем тип файла
                 const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
                 if (!allowedTypes.includes(file.type)) {
-                    alert('Пожалуйста, выберите изображение (JPG, PNG, WebP)')
+                    alert(window.sbpI18n.t('dash.qr.type'))
                     return
                 }
                 
                 // Проверяем размер файла (макс 2MB)
                 const maxSize = 2 * 1024 * 1024
                 if (file.size > maxSize) {
-                    alert('Файл слишком большой. Максимальный размер: 2MB')
+                    alert(window.sbpI18n.t('dash.qr.size'))
                     return
                 }
                 
                 uploadBtn.disabled = true
-                uploadBtn.textContent = 'Загрузка...'
-                uploadStatusEl.textContent = 'Загрузка файла...'
+                uploadBtn.textContent = window.sbpI18n.t('dash.loading')
+                uploadStatusEl.textContent = window.sbpI18n.t('dash.qr.uploading')
                 uploadStatusEl.style.color = '#ff9800'
                 
                 try {
@@ -268,12 +268,12 @@
                     console.log('Профиль обновлён')
                     
                     // Показываем успех
-                    uploadStatusEl.textContent = '✅ QR-код успешно загружен!'
+                    uploadStatusEl.textContent = '✅ ' + window.sbpI18n.t('dash.qr.ok')
                     uploadStatusEl.style.color = '#4CAF50'
                     
                     qrPreviewEl.innerHTML = `
-                        <img src="${publicUrl}" alt="QR-код СБП">
-                        <p>QR-код загружен</p>
+                        <img src="${publicUrl}" alt="QR">
+                        <p>${window.sbpI18n.t('dash.qr.loaded')}</p>
                     `
                     
                     // Обновляем профиль
@@ -287,7 +287,7 @@
                     uploadStatusEl.style.color = '#f44336'
                 } finally {
                     uploadBtn.disabled = false
-                    uploadBtn.textContent = 'Загрузить QR-код'
+                    uploadBtn.textContent = window.sbpI18n.t('dash.qr.btn')
                     qrUploadInput.value = ''
                 }
             }
@@ -300,15 +300,16 @@
                     )
                     
                     if (!donations || donations.length === 0) {
-                        donationsListEl.innerHTML = '<p>Донатов пока нет</p>'
+                        donationsListEl.innerHTML = '<p>' + window.sbpI18n.t('dash.empty') + '</p>'
                         return
                     }
                     
                     let html = '<table>'
-                    html += '<tr><th>Дата</th><th>Имя</th><th>Сумма</th><th>Сообщение</th><th>Статус</th><th>Действия</th></tr>'
+                    const t = window.sbpI18n.t
+                    html += '<tr><th>' + t('dash.col.date') + '</th><th>' + t('dash.col.name') + '</th><th>' + t('dash.col.amount') + '</th><th>' + t('dash.col.message') + '</th><th>' + t('dash.col.status') + '</th><th>' + t('dash.col.actions') + '</th></tr>'
                     
                     donations.forEach(d => {
-                        const date = new Date(d.created_at).toLocaleString('ru-RU')
+                        const date = new Date(d.created_at).toLocaleString(window.sbpI18n.currentLang() === 'en' ? 'en-US' : 'ru-RU')
                         const statusClass = `status-${d.status}`
                         
                         html += `
@@ -320,8 +321,8 @@
                                 <td class="${statusClass}">${getStatusText(d.status)}</td>
                                 <td>
                                     ${d.status === 'pending' ? `
-                                        <button onclick="confirmDonation('${d.id}')" style="background: #4CAF50; padding: 5px 10px;">Подтвердить</button>
-                                        <button onclick="rejectDonation('${d.id}')" style="background: #f44336; padding: 5px 10px;">Отклонить</button>
+                                        <button onclick="confirmDonation('${d.id}')" style="background: #4CAF50; padding: 5px 10px;">${t('dash.confirm')}</button>
+                                        <button onclick="rejectDonation('${d.id}')" style="background: #f44336; padding: 5px 10px;">${t('dash.reject')}</button>
                                     ` : '—'}
                                 </td>
                             </tr>
@@ -333,23 +334,17 @@
                     
                 } catch (error) {
                     console.error('Ошибка загрузки донатов:', error)
-                    donationsListEl.innerHTML = '<p>Ошибка загрузки донатов</p>'
+                    donationsListEl.innerHTML = '<p>' + window.sbpI18n.t('dash.loadError') + '</p>'
                 }
             }
             
             // Функции для работы со статусами
             function getStatusText(status) {
-                const statusMap = {
-                    'pending': 'Ожидает',
-                    'confirmed': 'Подтверждён',
-                    'rejected': 'Отклонён',
-                    'refunded': 'Возвращён'
-                }
-                return statusMap[status] || status
+                return window.sbpI18n.t('dash.status.' + status) || status
             }
             
             async function confirmDonation(donationId) {
-                if (!confirm('Подтвердить получение доната?')) return
+                if (!confirm(window.sbpI18n.t('dash.confirmAsk'))) return
                 try {
                     await window.sbpApi.request('/api/donations/' + donationId, {
                         method: 'PATCH',
@@ -363,7 +358,7 @@
             }
             
             async function rejectDonation(donationId) {
-                if (!confirm('Отклонить этот донат?')) return
+                if (!confirm(window.sbpI18n.t('dash.rejectAsk'))) return
                 try {
                     await window.sbpApi.request('/api/donations/' + donationId, {
                         method: 'PATCH',
@@ -377,7 +372,7 @@
             }
             
             async function confirmAllPending() {
-                if (!confirm('Подтвердить все ожидающие донаты?')) return
+                if (!confirm(window.sbpI18n.t('dash.confirmAllAsk'))) return
                 try {
                     await window.sbpApi.request('/api/donations/confirm-all', { method: 'POST' })
                     await loadDonations()
@@ -392,25 +387,29 @@
                 const link = donateLinkEl.textContent
                 try {
                     await navigator.clipboard.writeText(link)
-                    copyLinkBtn.textContent = 'Скопировано!'
+                    copyLinkBtn.textContent = window.sbpI18n.t('dash.copied')
                     copyLinkBtn.classList.add('copied')
                     copyStatusEl.textContent = '✓'
                     copyStatusEl.style.color = '#4CAF50'
                     
                     setTimeout(() => {
-                        copyLinkBtn.textContent = 'Скопировать ссылку'
+                        copyLinkBtn.textContent = window.sbpI18n.t('dash.copy')
                         copyLinkBtn.classList.remove('copied')
                         copyStatusEl.textContent = ''
                     }, 2000)
                 } catch (err) {
                     console.error('Ошибка копирования:', err)
-                    alert('Не удалось скопировать ссылку')
+                    alert(window.sbpI18n.t('dash.copyFail'))
                 }
             }
             
             // Экспортируем функции для использования в onclick
             window.confirmDonation = confirmDonation
             window.rejectDonation = rejectDonation
+            document.addEventListener('language-changed', () => {
+                if (currentProfile) loadProfile()
+                loadDonations()
+            })
             
             // Добавляем глобальную функцию для отладки
             window.debugProfile = async () => {

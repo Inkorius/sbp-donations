@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Поддержать стримера - SBP Donations</title>
+    <title data-i18n-title="donate.docTitle">Поддержать стримера - SBP Donations</title>
     <style>
         * {
             margin: 0;
@@ -251,6 +251,17 @@
             color: #ff4081;
         }
 
+        [data-set-lang] {
+            cursor: pointer;
+            border: 0;
+            border-radius: 4px;
+        }
+
+        [data-set-lang].active {
+            background: #ffd54f;
+            color: #333;
+        }
+
         .steps {
             display: flex;
             justify-content: space-between;
@@ -332,7 +343,7 @@
                         <button type="button" data-set-lang="en" style="padding:6px 10px;">EN</button>
                     </div>
                 </div>
-                <p class="streamer-description">Поддержка стримера напрямую</p>
+                <p class="streamer-description" data-i18n="donate.subtitle">Поддержка стримера напрямую</p>
             </div>
             
             <div class="streamer-info">
@@ -346,15 +357,15 @@
             <div class="steps">
                 <div class="step">
                     <div class="step-number">1</div>
-                    <div class="step-text">Отсканируйте QR-код в СберБанк Онлайн</div>
+                    <div class="step-text" data-i18n="donate.step1">Отсканируйте QR-код в СберБанк Онлайн</div>
                 </div>
                 <div class="step">
                     <div class="step-number">2</div>
-                    <div class="step-text">Введите сумму и комментарий</div>
+                    <div class="step-text" data-i18n="donate.step2">Введите сумму и комментарий</div>
                 </div>
                 <div class="step">
                     <div class="step-number">3</div>
-                    <div class="step-text">Нажмите "Уведомить стримера"</div>
+                    <div class="step-text" data-i18n="donate.step3">Нажмите "Уведомить стримера"</div>
                 </div>
             </div>
             
@@ -363,37 +374,36 @@
         
         <div class="right-section">
             <div class="qr-section">
-                <h3 class="qr-title">QR-код для перевода</h3>
+                <h3 class="qr-title" data-i18n="donate.qrTitle">QR-код для перевода</h3>
                 <div class="qr-code-container" id="qr-code-container">
-                    <!-- QR-код будет загружен через JS -->
-                    <p id="qr-placeholder">QR-код загружается...</p>
+                    <p id="qr-placeholder" data-i18n="donate.qrLoading">QR-код загружается...</p>
                 </div>
                 <p class="instructions">
-                    📱 Откройте <strong>СберБанк Онлайн</strong> и наведите камеру на QR-код<br>
-                    💳 Или введите номер телефона вручную
+                    📱 <span data-i18n="donate.instr1">Откройте СберБанк Онлайн и наведите камеру на QR-код</span><br>
+                    💳 <span data-i18n="donate.instr2">Или введите номер телефона вручную</span>
                 </p>
             </div>
             
             <div class="donation-form">
-                <h3 class="form-title">Уведомить о переводе</h3>
+                <h3 class="form-title" data-i18n="donate.formTitle">Уведомить о переводе</h3>
                 <form id="donation-form">
                     <div class="form-group">
-                        <label for="donor-name">Ваше имя или никнейм *</label>
-                        <input type="text" id="donor-name" placeholder="Как к вам обращаться?" required>
+                        <label for="donor-name" data-i18n="donate.name">Ваше имя или никнейм *</label>
+                        <input type="text" id="donor-name" data-i18n-placeholder="donate.namePh" placeholder="Как к вам обращаться?" required>
                     </div>
                     
                     <div class="form-group">
-                        <label for="amount">Сумма перевода (₽) *</label>
-                        <input type="number" id="amount" min="10" step="1" placeholder="Например: 100" required>
+                        <label for="amount" data-i18n="donate.amount">Сумма перевода (₽) *</label>
+                        <input type="number" id="amount" min="10" step="1" data-i18n-placeholder="donate.amountPh" placeholder="Например: 100" required>
                     </div>
                     
                     <div class="form-group">
-                        <label for="message">Сообщение для стримера</label>
-                        <textarea id="message" placeholder="Напишите что-нибудь приятное..."></textarea>
+                        <label for="message" data-i18n="donate.message">Сообщение для стримера</label>
+                        <textarea id="message" data-i18n-placeholder="donate.messagePh" placeholder="Напишите что-нибудь приятное..."></textarea>
                     </div>
                     
                     <button type="submit" class="submit-btn">
-                        📢 Уведомить стримера о переводе
+                        📢 <span data-i18n="donate.submit">Уведомить стримера о переводе</span>
                     </button>
                 </form>
                 
@@ -429,19 +439,46 @@
             const donationFormSection = document.querySelector('.donation-form');
             
             // Если нет ни username, ни userId, показываем сообщение
+            let loadedProfile = null;
+
+            function t(key) {
+                return window.sbpI18n.t(key);
+            }
+
+            function applyStreamer(profile) {
+                streamerNameEl.textContent = profile.display_name || profile.username;
+                streamerDescriptionEl.textContent = profile.description || t('donate.thanks');
+                if (profile.sber_qr_url) {
+                    qrCodeContainerEl.innerHTML = `<img src="${profile.sber_qr_url}" alt="QR" crossorigin="anonymous">`;
+                } else {
+                    qrCodeContainerEl.innerHTML = '<p>' + t('donate.qrMissing') + '</p>';
+                }
+            }
+
             if (!username && !userId) {
                 showNoStreamerMessage();
             } else {
                 loadStreamerData();
             }
+
+            document.addEventListener('language-changed', () => {
+                if (!username && !userId) {
+                    streamerNameEl.textContent = t('donate.noStreamer');
+                    streamerDescriptionEl.textContent = t('donate.useLink');
+                    return;
+                }
+                if (loadedProfile) {
+                    applyStreamer(loadedProfile);
+                }
+            });
             
             // Функция показа сообщения, когда стример не указан
             function showNoStreamerMessage() {
                 qrSection.style.display = 'none';
                 donationFormSection.style.display = 'none';
                 
-                streamerNameEl.textContent = 'Стример не указан';
-                streamerDescriptionEl.textContent = 'Используйте ссылку, предоставленную стримером';
+                streamerNameEl.textContent = t('donate.noStreamer');
+                streamerDescriptionEl.textContent = t('donate.useLink');
                 
                 streamerAvatarEl.innerHTML = `
                     <div style="width:100%;height:100%;background:#7c4dff;display:flex;align-items:center;justify-content:center;color:white;font-size:2.5rem;">
@@ -453,14 +490,15 @@
                 const instructions = document.createElement('div');
                 instructions.innerHTML = `
                     <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px; margin-top: 20px;">
-                        <h3>Как поддержать стримера?</h3>
-                        <p>1. Получите уникальную ссылку от стримера</p>
-                        <p>2. Перейдите по этой ссылке</p>
-                        <p>3. Отсканируйте QR-код и сделайте перевод</p>
-                        <p>4. Уведомите стримера о переводе через форму</p>
+                        <h3 data-i18n="donate.howTitle"></h3>
+                        <p>1. <span data-i18n="donate.how1"></span></p>
+                        <p>2. <span data-i18n="donate.how2"></span></p>
+                        <p>3. <span data-i18n="donate.how3"></span></p>
+                        <p>4. <span data-i18n="donate.how4"></span></p>
                     </div>
                 `;
                 document.querySelector('.left-section').appendChild(instructions);
+                window.sbpI18n.apply();
             }
             
             // Загружаем данные стримера
@@ -475,16 +513,8 @@
                     }
                     
                     if (profile) {
-                        // Обновляем информацию о стримере
-                        streamerNameEl.textContent = profile.display_name || profile.username;
-                        streamerDescriptionEl.textContent = profile.description || 'Спасибо за вашу поддержку!';
-                        
-                        // Загружаем QR-код если есть
-                        if (profile.sber_qr_url) {
-                            qrCodeContainerEl.innerHTML = `<img src="${profile.sber_qr_url}" alt="QR-код СБП" crossorigin="anonymous">`;
-                        } else {
-                            qrCodeContainerEl.innerHTML = '<p>QR-код не настроен</p>';
-                        }
+                        loadedProfile = profile;
+                        applyStreamer(profile);
                         
                         // Устанавливаем аватар
                         if (profile.avatar_url) {
@@ -506,9 +536,9 @@
                     }
                 } catch (error) {
                     console.error('Ошибка загрузки данных стримера:', error);
-                    streamerNameEl.textContent = 'Ошибка загрузки';
-                    streamerDescriptionEl.textContent = error.message || 'Не удалось загрузить данные стримера';
-                    qrCodeContainerEl.innerHTML = '<p>Не удалось загрузить данные</p>';
+                    streamerNameEl.textContent = t('donate.loadError');
+                    streamerDescriptionEl.textContent = error.message || t('donate.loadError');
+                    qrCodeContainerEl.innerHTML = '<p>' + t('donate.loadError') + '</p>';
                 }
             }
             
@@ -521,14 +551,14 @@
                 const message = document.getElementById('message').value.trim();
                 
                 if (!donorName || !amount || amount < 10) {
-                    showMessage('Пожалуйста, заполните все обязательные поля корректно (минимальная сумма 10₽)', 'error');
+                    showMessage(t('donate.badAmount'), 'error');
                     return;
                 }
                 
                 // Проверяем, загружен ли профиль
                 const profileId = donationFormEl.dataset.profileId;
                 if (!profileId) {
-                    showMessage('Не удалось определить стримера. Пожалуйста, обновите страницу.', 'error');
+                    showMessage(t('donate.noProfile'), 'error');
                     return;
                 }
                 
@@ -545,7 +575,7 @@
                     });
                     
                     // Показываем сообщение об успехе
-                    showMessage('Спасибо! Стример получил уведомление о вашем переводе.', 'success');
+                    showMessage(t('donate.ok'), 'success');
                     
                     // Очищаем форму
                     donationFormEl.reset();
@@ -557,7 +587,7 @@
                     
                 } catch (error) {
                     console.error('Ошибка отправки доната:', error);
-                    showMessage('Произошла ошибка при отправке. Пожалуйста, попробуйте ещё раз.', 'error');
+                    showMessage(error.message || t('donate.error'), 'error');
                 }
             });
             
