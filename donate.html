@@ -325,7 +325,13 @@
     <div class="donation-container">
         <div class="left-section">
             <div class="logo">
-                <h1><span class="heart">❤</span> SBP Donations</h1>
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+                    <h1><span class="heart">❤</span> SBP Donations</h1>
+                    <div>
+                        <button type="button" data-set-lang="ru" style="padding:6px 10px;">RU</button>
+                        <button type="button" data-set-lang="en" style="padding:6px 10px;">EN</button>
+                    </div>
+                </div>
                 <p class="streamer-description">Поддержка стримера напрямую</p>
             </div>
             
@@ -352,7 +358,7 @@
                 </div>
             </div>
             
-            <a href="/sbp-donations/" class="back-link">← На главную</a>
+            <a href="index.html" class="back-link" data-i18n="nav.home">← На главную</a>
         </div>
         
         <div class="right-section">
@@ -402,12 +408,10 @@
         </div>
     </div>
 
-    <!-- Подключаем Supabase через CDN -->
-    <script src="js/supabase-cdn.js"></script>
-    
+    <script src="js/i18n.js"></script>
+    <script src="js/api-client.js"></script>
     <script>
-        // Ждем загрузки Supabase
-        document.addEventListener('supabase-loaded', function() {
+        document.addEventListener('DOMContentLoaded', function() {
             // Получаем параметры из URL
             const urlParams = new URLSearchParams(window.location.search);
             const username = urlParams.get('user');
@@ -465,29 +469,9 @@
                     let profile = null;
                     
                     if (username) {
-                        // Ищем по username
-                        const { data, error } = await window.supabase
-                            .from('profiles')
-                            .select('*')
-                            .eq('username', username)
-                            .single();
-                        
-                        if (error) {
-                            throw new Error(`Пользователь с именем "${username}" не найден`);
-                        }
-                        profile = data;
+                        profile = await window.sbpApi.request('/api/profiles/' + encodeURIComponent(username));
                     } else if (userId) {
-                        // Ищем по id
-                        const { data, error } = await window.supabase
-                            .from('profiles')
-                            .select('*')
-                            .eq('id', userId)
-                            .single();
-                        
-                        if (error) {
-                            throw new Error(`Пользователь с ID "${userId}" не найден`);
-                        }
-                        profile = data;
+                        throw new Error('Откройте страницу по имени стримера, не по id');
                     }
                     
                     if (profile) {
@@ -550,19 +534,15 @@
                 
                 try {
                     // Создаём запись о донате
-                    const { error } = await window.supabase
-                        .from('donations')
-                        .insert({
+                    await window.sbpApi.request('/api/donations', {
+                        method: 'POST',
+                        body: JSON.stringify({
                             profile_id: profileId,
                             donor_name: donorName,
                             amount: amount,
-                            message: message || null,
-                            status: 'pending'
-                        });
-                    
-                    if (error) {
-                        throw error;
-                    }
+                            message: message || null
+                        })
+                    });
                     
                     // Показываем сообщение об успехе
                     showMessage('Спасибо! Стример получил уведомление о вашем переводе.', 'success');

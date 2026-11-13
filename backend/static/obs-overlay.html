@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OBS Overlay - SBP Donations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: transparent !important;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Контейнер для донатов */
+        #donations-container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* Стиль одного доната */
+        .donation-item {
+            background: linear-gradient(135deg, rgba(124, 77, 255, 0.95) 0%, rgba(101, 31, 255, 0.95) 100%);
+            color: white;
+            margin: 10px;
+            padding: 15px 20px;
+            border-radius: 12px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+            border-left: 5px solid #ff4081;
+            max-width: 400px;
+            opacity: 0;
+            position: relative;
+            overflow: hidden;
+            pointer-events: auto;
+        }
+
+        /* Анимация появления */
+        @keyframes slideIn {
+            0% {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            10% {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            90% {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            100% {
+                opacity: 0;
+                transform: translateX(-100%);
+            }
+        }
+
+        @keyframes fadeIn {
+            0% { opacity: 0; transform: translateY(20px); }
+            10% { opacity: 1; transform: translateY(0); }
+            90% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-20px); }
+        }
+
+        @keyframes bounceIn {
+            0% { opacity: 0; transform: scale(0.3); }
+            50% { opacity: 1; transform: scale(1.05); }
+            70% { transform: scale(0.9); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        /* Анимация для больших сумм */
+        @keyframes bigAmount {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        /* Элементы доната */
+        .donation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .donor-name {
+            font-weight: 700;
+            font-size: 1.3rem;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .donation-amount {
+            font-weight: 800;
+            font-size: 1.5rem;
+            color: #ffeb3b;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .donation-message {
+            font-size: 1rem;
+            line-height: 1.4;
+            padding-top: 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Индикатор новой записи */
+        .new-indicator {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ff4081;
+            color: white;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            100% { transform: scale(1); }
+        }
+
+        /* Контролы для настройки (только для отладки) */
+        .controls {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 1000;
+            display: none;
+        }
+
+        .controls.active {
+            display: block;
+        }
+
+        /* Позиционирование через классы */
+        .position-top-left { top: 20px; left: 20px; }
+        .position-top-right { top: 20px; right: 20px; }
+        .position-bottom-left { bottom: 20px; left: 20px; }
+        .position-bottom-right { bottom: 20px; right: 20px; }
+        .position-center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+
+        /* Статус подключения */
+        .connection-status {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 999;
+        }
+
+        /* Тема "Минимализм" */
+        .theme-minimal .donation-item {
+            background: rgba(0, 0, 0, 0.8);
+            border-left: 3px solid #7c4dff;
+            box-shadow: none;
+        }
+
+        .theme-minimal .donation-amount {
+            color: #7c4dff;
+        }
+
+        /* Тема "Яркая" */
+        .theme-bright .donation-item {
+            background: linear-gradient(135deg, #ff4081 0%, #7c4dff 100%);
+            border-left: 5px solid #ffeb3b;
+        }
+    </style>
+</head>
+<body>
+    <!-- Контейнер для донатов -->
+    <div id="donations-container"></div>
+
+    <!-- Статус подключения -->
+    <div class="connection-status" id="connection-status">
+        <span id="status-text">Подключение...</span>
+    </div>
+
+    <!-- Контролы для отладки (Ctrl+D чтобы показать/скрыть) -->
+    <div class="controls" id="debug-controls">
+        <div>Донатов: <span id="counter">0</span></div>
+        <div>Режим: <span id="mode">Инициализация</span></div>
+        <div>Статус: <span id="status">Загрузка...</span></div>
+        <div>Стример ID: <span id="streamer-id">-</span></div>
+        <div>
+            <button onclick="testDonation()">Тест донат</button>
+            <button onclick="clearDonations()">Очистить</button>
+            <button onclick="toggleTheme()">Сменить тему</button>
+        </div>
+    </div>
+
+    <!-- Подключаем Supabase -->
+    <script src="js/supabase-cdn.js"></script>
+
+    <script>
+        // ========== КОНФИГУРАЦИЯ ==========
+        const urlParams = new URLSearchParams(window.location.search);
+        const config = {
+            username: urlParams.get('user') || 'parfjek',
+            duration: parseInt(urlParams.get('duration')) || 10000,
+            position: urlParams.get('position') || 'top-right',
+            maxDonations: parseInt(urlParams.get('max')) || 5,
+            animation: urlParams.get('animation') || 'slideIn',
+            sound: urlParams.has('sound'),
+            theme: urlParams.get('theme') || 'default',
+            debug: urlParams.has('debug'),
+            useRealtime: !urlParams.has('no-realtime') // можно отключить через ?no-realtime=true
+        };
+
+        // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
+        let currentProfileId = null;
+        let donationsCount = 0;
+        const donationsQueue = [];
+        let currentTheme = config.theme;
+        let connectionMode = 'initializing'; // 'realtime', 'polling', 'offline'
+        let lastCheckTime = new Date().toISOString();
+        let pollingInterval = null;
+
+        // ========== ОСНОВНАЯ ИНИЦИАЛИЗАЦИЯ ==========
+        document.addEventListener('supabase-loaded', initializeOverlay);
+
+        async function initializeOverlay() {
+            console.log('🎬 OBS Overlay: Инициализация...');
+            updateStatus('🔍 Поиск стримера...');
+            
+            // Показать конфигурацию
+            console.log('⚙️ Конфигурация:', config);
+            if (config.debug) {
+                document.getElementById('debug-controls').classList.add('active');
+            }
+
+            try {
+                // Получаем профиль стримера
+                const { data: profile, error } = await window.supabase
+                    .from('profiles')
+                    .select('id, username, display_name')
+                    .eq('username', config.username)
+                    .single();
+
+                if (error || !profile) {
+                    updateStatus(`❌ Стример "${config.username}" не найден`, 'error');
+                    showErrorMessage(`Стример "${config.username}" не найден`);
+                    return;
+                }
+
+                currentProfileId = profile.id;
+                document.getElementById('streamer-id').textContent = profile.id.substring(0, 8) + '...';
+                updateStatus(`✅ Стример: ${profile.display_name || profile.username}`);
+                
+                // Применяем тему
+                document.body.classList.add(`theme-${currentTheme}`);
+
+                // Загружаем последние донаты
+                await loadRecentDonations(profile.id);
+
+                // Пытаемся использовать Realtime
+                if (config.useRealtime) {
+                    await setupRealtime(profile.id);
+                    
+                    // Если Realtime не подключился за 10 секунд, переключаемся на polling
+                    setTimeout(() => {
+                        if (connectionMode !== 'realtime') {
+                            console.log('⏰ Realtime timeout, switching to polling...');
+                            setupPolling(profile.id);
+                        }
+                    }, 10000);
+                } else {
+                    // Если Realtime отключен в настройках
+                    setupPolling(profile.id);
+                }
+
+            } catch (error) {
+                console.error('❌ Ошибка инициализации:', error);
+                updateStatus('❌ Ошибка подключения', 'error');
+                showErrorMessage('Ошибка подключения к серверу');
+            }
+        }
+
+        // ========== REALTIME ПОДКЛЮЧЕНИЕ ==========
+        async function setupRealtime(profileId) {
+            console.log('🔌 Пробую подключиться к Realtime...');
+            updateStatus('🔌 Подключение к Realtime...');
+            
+            try {
+                const channel = window.supabase.channel(`donations-${profileId}`, {
+                    config: {
+                        broadcast: { ack: false },
+                        presence: { key: profileId }
+                    }
+                });
+                
+                // Настраиваем обработчик новых донатов
+                channel.on(
+                    'postgres_changes',
+                    {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'donations',
+                        filter: `profile_id=eq.${profileId}`
+                    },
+                    (payload) => {
+                        console.log('🎯 Новый донат через Realtime:', payload.new);
+                        addDonation(payload.new);
+                    }
+                ).subscribe((status) => {
+                    console.log('📡 Realtime статус:', status);
+                    
+                    if (status === 'SUBSCRIBED') {
+                        connectionMode = 'realtime';
+                        document.getElementById('mode').textContent = 'Realtime';
+                        updateStatus('✅ Realtime подключен', 'success');
+                        console.log('✅ Realtime успешно подключен!');
+                        
+                        // Останавливаем polling, если он был
+                        if (pollingInterval) {
+                            clearInterval(pollingInterval);
+                            pollingInterval = null;
+                        }
+                    } else if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+                        updateStatus('⚠️ Realtime ошибка, переключаюсь на polling...', 'warning');
+                        setupPolling(profileId);
+                    }
+                });
+
+            } catch (error) {
+                console.error('❌ Ошибка Realtime:', error);
+                setupPolling(profileId);
+            }
+        }
+
+        // ========== POLLING (резервный метод) ==========
+        function setupPolling(profileId) {
+            if (connectionMode === 'polling') return;
+            
+            console.log('🔄 Настраиваю polling (опрос каждые 3 секунды)...');
+            connectionMode = 'polling';
+            document.getElementById('mode').textContent = 'Polling';
+            updateStatus('🔄 Использую polling...', 'warning');
+            
+            // Очищаем предыдущий интервал, если был
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            // Функция проверки новых донатов
+            async function checkNewDonations() {
+                try {
+                    const { data: newDonations, error } = await window.supabase
+                        .from('donations')
+                        .select('*')
+                        .eq('profile_id', profileId)
+                        .gt('created_at', lastCheckTime)
+                        .order('created_at', { ascending: true });
+                    
+                    if (error) {
+                        console.error('❌ Ошибка polling:', error);
+                        return;
+                    }
+                    
+                    if (newDonations && newDonations.length > 0) {
+                        console.log(`📥 Найдено новых донатов: ${newDonations.length}`);
+                        newDonations.forEach(donation => {
+                            addDonation(donation);
+                        });
+                        lastCheckTime = new Date().toISOString();
+                        updateStatus(`📥 Получено: ${newDonations.length} донат(ов)`, 'success');
+                    }
+                } catch (error) {
+                    console.error('❌ Ошибка в polling:', error);
+                }
+            }
+            
+            // Запускаем проверку каждые 3 секунды
+            pollingInterval = setInterval(checkNewDonations, 3000);
+            
+            // Первая проверка сразу
+            checkNewDonations();
+        }
+
+        // ========== ЗАГРУЗКА ПОСЛЕДНИХ ДОНАТОВ ==========
+        async function loadRecentDonations(profileId) {
+            try {
+                const { data: recentDonations } = await window.supabase
+                    .from('donations')
+                    .select('*')
+                    .eq('profile_id', profileId)
+                    .order('created_at', { descending: true })
+                    .limit(config.maxDonations);
+                
+                if (recentDonations && recentDonations.length > 0) {
+                    console.log(`📚 Загружено последних донатов: ${recentDonations.length}`);
+                    // Показываем в обратном порядке (старые первыми)
+                    recentDonations.reverse().forEach(donation => {
+                        addDonation(donation, true); // true = без анимации
+                    });
+                }
+            } catch (error) {
+                console.error('❌ Ошибка загрузки истории:', error);
+            }
+        }
+
+        // ========== ДОБАВЛЕНИЕ ДОНАТА НА ЭКРАН ==========
+        function addDonation(donation, skipAnimation = false) {
+            donationsCount++;
+            document.getElementById('counter').textContent = donationsCount;
+
+            // Создаем элемент доната
+            const donationEl = document.createElement('div');
+            donationEl.className = `donation-item position-${config.position}`;
+            
+            // Специальный стиль для больших сумм
+            if (donation.amount >= 1000) {
+                donationEl.style.borderLeftColor = '#ffeb3b';
+                donationEl.style.background = 'linear-gradient(135deg, rgba(255, 193, 7, 0.95) 0%, rgba(255, 152, 0, 0.95) 100%)';
+                donationEl.classList.add('big-donation');
+            } else if (donation.amount >= 500) {
+                donationEl.style.borderLeftColor = '#4caf50';
+            }
+
+            // Заполняем содержимое
+            donationEl.innerHTML = `
+                <div class="new-indicator">NEW</div>
+                <div class="donation-header">
+                    <div class="donor-name">${escapeHtml(donation.donor_name)}</div>
+                    <div class="donation-amount">${formatAmount(donation.amount)} ₽</div>
+                </div>
+                ${donation.message ? `<div class="donation-message">${escapeHtml(donation.message)}</div>` : ''}
+            `;
+
+            // Добавляем в контейнер
+            const container = document.getElementById('donations-container');
+            container.appendChild(donationEl);
+
+            // Добавляем в очередь для управления
+            donationsQueue.push(donationEl);
+
+            // Ограничиваем количество одновременно показанных донатов
+            if (donationsQueue.length > config.maxDonations) {
+                const oldDonation = donationsQueue.shift();
+                if (oldDonation.parentNode) {
+                    oldDonation.style.animation = 'none';
+                    oldDonation.style.opacity = '0';
+                    setTimeout(() => {
+                        if (oldDonation.parentNode) {
+                            oldDonation.parentNode.removeChild(oldDonation);
+                        }
+                    }, 300);
+                }
+            }
+
+            // Запускаем анимацию (если не пропущена)
+            if (!skipAnimation) {
+                donationEl.style.animation = `${config.animation} ${config.duration}ms forwards`;
+                
+                // Воспроизводим звук если включен
+                if (config.sound) {
+                    playNotificationSound(donation.amount);
+                }
+            } else {
+                donationEl.style.opacity = '1';
+                donationEl.style.transform = 'translateX(0)';
+            }
+
+            // Автоматическое удаление после показа
+            setTimeout(() => {
+                const index = donationsQueue.indexOf(donationEl);
+                if (index > -1) {
+                    donationsQueue.splice(index, 1);
+                }
+                if (donationEl.parentNode) {
+                    donationEl.style.opacity = '0';
+                    donationEl.style.transition = 'opacity 0.5s';
+                    setTimeout(() => {
+                        if (donationEl.parentNode) {
+                            donationEl.parentNode.removeChild(donationEl);
+                        }
+                    }, 500);
+                }
+            }, skipAnimation ? config.duration : config.duration);
+        }
+
+        // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatAmount(amount) {
+            return parseFloat(amount).toFixed(0);
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            const statusTextEl = document.getElementById('status-text');
+            
+            if (statusEl) statusEl.textContent = message;
+            if (statusTextEl) statusTextEl.textContent = message;
+            
+            // Цвет в зависимости от типа
+            const connectionStatus = document.getElementById('connection-status');
+            if (connectionStatus) {
+                connectionStatus.style.background = 
+                    type === 'error' ? 'rgba(244, 67, 54, 0.8)' :
+                    type === 'success' ? 'rgba(76, 175, 80, 0.8)' :
+                    type === 'warning' ? 'rgba(255, 152, 0, 0.8)' :
+                    'rgba(0, 0, 0, 0.7)';
+            }
+            
+            console.log(`📢 ${message}`);
+        }
+
+        function showErrorMessage(message) {
+            const errorEl = document.createElement('div');
+            errorEl.className = `donation-item position-center`;
+            errorEl.innerHTML = `
+                <div style="color: #ff4081; text-align: center;">
+                    <strong>⚠️ Ошибка</strong><br>
+                    ${message}
+                </div>
+            `;
+            errorEl.style.background = 'rgba(0, 0, 0, 0.9)';
+            errorEl.style.opacity = '1';
+            errorEl.style.animation = 'none';
+            document.getElementById('donations-container').appendChild(errorEl);
+        }
+
+        function playNotificationSound(amount) {
+            try {
+                const soundUrl = amount >= 1000 ? 
+                    'https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3' :
+                    'https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3';
+                
+                const audio = new Audio(soundUrl);
+                audio.volume = 0.2;
+                audio.play().catch(e => console.log('🔇 Звук заблокирован браузером'));
+            } catch (e) {
+                console.log('🔇 Звук не поддерживается');
+            }
+        }
+
+        // ========== ФУНКЦИИ ОТЛАДКИ ==========
+        function testDonation() {
+            const testNames = ['Иван', 'Мария', 'Алексей', 'Дмитрий', 'Анна'];
+            const testMessages = [
+                'Спасибо за стрим!',
+                'Отличный контент!',
+                'Продолжайте в том же духе!',
+                'Лучший стример!',
+                'Забирайте на кофе :)'
+            ];
+            
+            const testDonation = {
+                donor_name: testNames[Math.floor(Math.random() * testNames.length)],
+                amount: Math.floor(Math.random() * 2000) + 10,
+                message: testMessages[Math.floor(Math.random() * testMessages.length)]
+            };
+            
+            console.log('🧪 Тестовый донат:', testDonation);
+            addDonation(testDonation);
+        }
+
+        function clearDonations() {
+            const container = document.getElementById('donations-container');
+            while (container.firstChild) {
+                container.removeChild(container.firstChild);
+            }
+            donationsQueue.length = 0;
+            donationsCount = 0;
+            document.getElementById('counter').textContent = '0';
+            console.log('🧹 Все донаты очищены');
+        }
+
+        function toggleTheme() {
+            const themes = ['default', 'minimal', 'bright'];
+            const currentIndex = themes.indexOf(currentTheme);
+            const nextTheme = themes[(currentIndex + 1) % themes.length];
+            
+            // Удаляем старую тему
+            document.body.classList.remove(`theme-${currentTheme}`);
+            // Добавляем новую
+            document.body.classList.add(`theme-${nextTheme}`);
+            
+            currentTheme = nextTheme;
+            updateStatus(`🎨 Тема изменена: ${nextTheme}`);
+        }
+
+        // ========== ГЛОБАЛЬНЫЕ СОБЫТИЯ ==========
+        // Показать/скрыть контролы по Ctrl+D
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'd') {
+                document.getElementById('debug-controls').classList.toggle('active');
+                console.log('🔧 Отладка ' + (document.getElementById('debug-controls').classList.contains('active') ? 'включена' : 'отключена'));
+            }
+        });
+
+        // Информация о конфигурации при загрузке
+        console.log('🚀 OBS Overlay запущен с конфигурацией:', config);
+        console.log('💡 Нажмите Ctrl+D для показа панели отладки');
+        console.log('🌐 URL параметры:');
+        console.log('  ?user=username       - имя стримера');
+        console.log('  ?duration=10000      - время показа в ms');
+        console.log('  ?position=top-right  - позиция (top-left, top-right, etc)');
+        console.log('  ?max=5               - максимум донатов одновременно');
+        console.log('  ?animation=slideIn   - анимация (slideIn, fadeIn)');
+        console.log('  ?sound=true          - включить звук');
+        console.log('  ?theme=default       - тема (default, minimal, bright)');
+        console.log('  ?debug=true          - показать панель отладки');
+        console.log('  ?no-realtime=true    - отключить Realtime (использовать только polling)');
+    </script>
+</body>
+</html>

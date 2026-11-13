@@ -33,53 +33,59 @@
         .stat-label { color: #666; font-size: 14px; }
         h1 { color: #333; }
         h2 { color: #444; margin-top: 0; }
-        .logout-btn { background: #f44336; float: right; }
+        .logout-btn { background: #f44336; }
         .logout-btn:hover { background: #d32f2f; }
-        .user-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .user-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; gap: 12px; flex-wrap: wrap; }
+        .lang-switch button { padding: 8px 12px; cursor: pointer; }
+        .lang-switch button.active { background: #7c4dff; }
     </style>
 </head>
 <body>
     <div class="user-header">
-        <h1>Панель управления SBP Donations</h1>
-        <button class="logout-btn" onclick="logout()">Выйти</button>
+        <h1 data-i18n="dash.title">Панель управления</h1>
+        <div>
+            <button type="button" data-set-lang="ru">RU</button>
+            <button type="button" data-set-lang="en">EN</button>
+            <button class="logout-btn" onclick="logout()" data-i18n="dash.logout">Выйти</button>
+        </div>
     </div>
 
     <div class="section">
-        <h2>Ваш профиль</h2>
-        <div id="profile-info">Загрузка...</div>
-        <button id="refresh-profile-btn">Обновить профиль</button>
+        <h2 data-i18n="dash.profile">Ваш профиль</h2>
+        <div id="profile-info" data-i18n="dash.loading">Загрузка...</div>
+        <button id="refresh-profile-btn" data-i18n="dash.refresh">Обновить профиль</button>
     </div>
 
     <div class="stats" id="stats">
         <div class="stat-box">
             <div class="stat-value" id="total-donations">0</div>
-            <div class="stat-label">Всего донатов</div>
+            <div class="stat-label" data-i18n="dash.total">Всего донатов</div>
         </div>
         <div class="stat-box">
             <div class="stat-value" id="total-amount">0 ₽</div>
-            <div class="stat-label">Общая сумма</div>
+            <div class="stat-label" data-i18n="dash.amount">Общая сумма</div>
         </div>
         <div class="stat-box">
             <div class="stat-value" id="pending-donations">0</div>
-            <div class="stat-label">Ожидают подтверждения</div>
+            <div class="stat-label" data-i18n="dash.pending">Ожидают подтверждения</div>
         </div>
     </div>
 
     <div class="section">
-        <h2>Загрузить QR-код СБП</h2>
-        <p>Загрузите изображение вашего QR-кода от Сбербанка (JPG, PNG, до 2MB):</p>
+        <h2 data-i18n="dash.qr">Загрузить QR-код СБП</h2>
+        <p data-i18n="dash.qr.hint">Изображение QR-кода из банка (JPG, PNG, WebP, до 2 МБ)</p>
         <input type="file" id="qr-upload" accept="image/jpeg,image/png,image/jpg,image/webp">
-        <button id="upload-qr-btn">Загрузить QR-код</button>
+        <button id="upload-qr-btn" data-i18n="dash.qr.btn">Загрузить QR-код</button>
         <div id="qr-preview" class="qr-preview"></div>
         <div id="upload-status" style="margin-top: 10px;"></div>
     </div>
 
     <div class="section">
-        <h2>Ваша ссылка для донатов</h2>
+        <h2 data-i18n="dash.link">Ваша ссылка для донатов</h2>
         <div id="donate-link-container" style="display: none;">
-            <p>Поделитесь этой ссылкой со зрителями:</p>
+            <p data-i18n="dash.link.share">Отправьте эту ссылку зрителям</p>
             <div class="donate-link" id="donate-link"></div>
-            <button id="copy-link-btn" class="copy-btn">Скопировать ссылку</button>
+            <button id="copy-link-btn" class="copy-btn" data-i18n="dash.copy">Скопировать ссылку</button>
             <span id="copy-status" style="margin-left: 10px;"></span>
         </div>
         <div id="no-username" style="display: none; color: #f44336; padding: 10px; background: #ffebee; border-radius: 4px;">
@@ -88,20 +94,19 @@
     </div>
 
     <div class="section">
-        <h2>Последние донаты</h2>
+        <h2 data-i18n="dash.donations">Последние донаты</h2>
         <div id="donations-list">
-            <p>Загрузка донатов...</p>
+            <p data-i18n="dash.loading">Загрузка...</p>
         </div>
-        <button id="load-donations-btn">Обновить список</button>
-        <button id="confirm-all-btn" style="background: #4CAF50; display: none;">Подтвердить все ожидающие</button>
+        <button id="load-donations-btn" data-i18n="dash.reload">Обновить список</button>
+        <button id="confirm-all-btn" style="background: #4CAF50; display: none;" data-i18n="dash.confirmAll">Подтвердить все ожидающие</button>
     </div>
 
-    <!-- Подключаем Supabase через CDN -->
-    <script src="js/supabase-cdn.js"></script>
+    <script src="js/i18n.js"></script>
+    <script src="js/api-client.js"></script>
     
     <script>
-        // Ждем загрузки Supabase
-        document.addEventListener('supabase-loaded', async function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             // Элементы DOM
             const profileInfoEl = document.getElementById('profile-info')
             const refreshProfileBtn = document.getElementById('refresh-profile-btn')
@@ -126,16 +131,17 @@
             let currentUser = null
             let currentProfile = null
             
-            // Проверяем авторизацию
-            const { data: { user }, error } = await window.supabase.auth.getUser()
-            if (!user || error) {
-                const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-                window.location.href = basePath + '/login.html'
+            if (!window.sbpApi.token()) {
+                window.location.href = window.sbpApi.page('login.html')
                 return
             }
-                
-            currentUser = user
-            console.log('Текущий пользователь:', user.email)
+            try {
+                currentUser = await window.sbpApi.request('/api/auth/me')
+            } catch (err) {
+                window.sbpApi.setToken(null)
+                window.location.href = window.sbpApi.page('login.html')
+                return
+            }
             
             // Загружаем начальные данные
             await loadProfile()
@@ -159,43 +165,7 @@
                     console.log('Загрузка профиля для пользователя:', currentUser.id)
                     
                     // Сначала пробуем получить профиль
-                    let { data: profile, error } = await window.supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', currentUser.id)
-                        .single()
-                    
-                    // Если профиля нет, создаём его
-                    if (error) {
-                        console.log('Профиль не найден, создаём новый...')
-                        
-                        // Создаём username из email
-                        const username = currentUser.email.split('@')[0]
-                        
-                        // Создаём новый профиль
-                    const { data: newProfile, error: createError } = await window.supabase
-                        .from('profiles')
-                        .insert([
-                            {
-                             id: currentUser.id,
-                             username: username,
-                             display_name: username,
-                             sber_qr_url: null,
-                             description: null
-                            }
-                        ])
-                        .select()
-                        .single()
-                        
-                        if (createError) {
-                            console.error('Ошибка создания профиля:', createError)
-                            profileInfoEl.innerHTML = `<p style="color: red;">Ошибка создания профиля: ${createError.message}</p>`
-                            return
-                        }
-                        
-                        profile = newProfile
-                        console.log('Создан новый профиль:', profile)
-                    }
+                    const profile = await window.sbpApi.request('/api/profiles/me')
                     
                     currentProfile = profile
                     
@@ -218,8 +188,7 @@
                     
                     // Показываем ссылку для донатов, если есть username
                     if (profile.username) {
-                        const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-                        const donateLink = `${window.location.origin}${basePath}/donate.html?user=${profile.username}`
+                        const donateLink = `${window.location.origin}${window.sbpApi.page('donate.html')}?user=${profile.username}`
                         donateLinkEl.textContent = donateLink
                         donateLinkContainer.style.display = 'block'
                         noUsernameEl.style.display = 'none'
@@ -239,15 +208,9 @@
             // Загружаем статистику
             async function loadStats() {
                 try {
-                    const { data: donations, error } = await window.supabase
-                        .from('donations')
-                        .select('amount, status')
-                        .eq('profile_id', currentUser.id)
-                    
-                    if (error) {
-                        console.error('Ошибка загрузки статистики:', error)
-                        return
-                    }
+                    const donations = await window.sbpApi.request(
+                        '/api/donations?profile_id=' + encodeURIComponent(currentUser.id) + '&limit=100'
+                    )
                     
                     if (donations) {
                         const total = donations.length
@@ -294,51 +257,13 @@
                 uploadStatusEl.style.color = '#ff9800'
                 
                 try {
-                    console.log('Начало загрузки QR-кода...')
-                    
-                    // Генерируем уникальное имя файла
-                    const timestamp = Date.now()
-                    const random = Math.random().toString(36).substring(7)
-                    const fileName = `${currentUser.id}_${timestamp}_${random}.${file.name.split('.').pop()}`
-                    
-                    console.log('Имя файла:', fileName)
-                    
-                    // Загружаем в хранилище
-                    const { error: uploadError } = await window.supabase.storage
-                        .from('qr-codes')
-                        .upload(fileName, file)
-                    
-                    if (uploadError) {
-                        console.error('Ошибка загрузки в хранилище:', uploadError)
-                        throw new Error(`Ошибка загрузки: ${uploadError.message}`)
-                    }
-                    
-                    console.log('Файл загружен в хранилище')
-                    
-                    // Получаем публичный URL
-                    const { data: { publicUrl } } = window.supabase.storage
-                        .from('qr-codes')
-                        .getPublicUrl(fileName)
-                    
-                    console.log('Публичный URL:', publicUrl)
-                    
-                    // Обновляем профиль
-                    const { error: updateError } = await window.supabase
-                        .from('profiles')
-                        .update({ sber_qr_url: publicUrl })
-                        .eq('id', currentUser.id)
-                    
-                    if (updateError) {
-                        console.error('Ошибка обновления профиля:', updateError)
-                        
-                        // Если ошибка из-за отсутствия столбца, создаём его
-                        if (updateError.message.includes('sber_qr_url')) {
-                            alert('Ошибка: столбец sber_qr_url не найден в таблице profiles. Нужно добавить его в базу данных.')
-                            return
-                        }
-                        
-                        throw new Error(`Ошибка обновления профиля: ${updateError.message}`)
-                    }
+                    const formData = new FormData()
+                    formData.append('file', file)
+                    const updated = await window.sbpApi.request('/api/profiles/me/qr', {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    const publicUrl = updated.sber_qr_url
                     
                     console.log('Профиль обновлён')
                     
@@ -370,18 +295,9 @@
             // Загружаем донаты
             async function loadDonations() {
                 try {
-                    const { data: donations, error } = await window.supabase
-                        .from('donations')
-                        .select('*')
-                        .eq('profile_id', currentUser.id)
-                        .order('created_at', { ascending: false })
-                        .limit(20)
-                    
-                    if (error) {
-                        console.error('Ошибка загрузки донатов:', error)
-                        donationsListEl.innerHTML = '<p>Ошибка загрузки донатов</p>'
-                        return
-                    }
+                    const donations = await window.sbpApi.request(
+                        '/api/donations?profile_id=' + encodeURIComponent(currentUser.id) + '&limit=20'
+                    )
                     
                     if (!donations || donations.length === 0) {
                         donationsListEl.innerHTML = '<p>Донатов пока нет</p>'
@@ -433,51 +349,41 @@
             }
             
             async function confirmDonation(donationId) {
-                if (confirm('Подтвердить получение доната?')) {
-                    const { error } = await window.supabase
-                        .from('donations')
-                        .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
-                        .eq('id', donationId)
-                    
-                    if (error) {
-                        alert('Ошибка подтверждения: ' + error.message)
-                    } else {
-                        await loadDonations()
-                        await loadStats()
-                    }
+                if (!confirm('Подтвердить получение доната?')) return
+                try {
+                    await window.sbpApi.request('/api/donations/' + donationId, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ status: 'confirmed' }),
+                    })
+                    await loadDonations()
+                    await loadStats()
+                } catch (error) {
+                    alert(error.message)
                 }
             }
             
             async function rejectDonation(donationId) {
-                if (confirm('Отклонить этот донат?')) {
-                    const { error } = await window.supabase
-                        .from('donations')
-                        .update({ status: 'rejected' })
-                        .eq('id', donationId)
-                    
-                    if (error) {
-                        alert('Ошибка отклонения: ' + error.message)
-                    } else {
-                        await loadDonations()
-                        await loadStats()
-                    }
+                if (!confirm('Отклонить этот донат?')) return
+                try {
+                    await window.sbpApi.request('/api/donations/' + donationId, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ status: 'rejected' }),
+                    })
+                    await loadDonations()
+                    await loadStats()
+                } catch (error) {
+                    alert(error.message)
                 }
             }
             
             async function confirmAllPending() {
-                if (confirm('Подтвердить все ожидающие донаты?')) {
-                    const { error } = await window.supabase
-                        .from('donations')
-                        .update({ status: 'confirmed', confirmed_at: new Date().toISOString() })
-                        .eq('profile_id', currentUser.id)
-                        .eq('status', 'pending')
-                    
-                    if (error) {
-                        alert('Ошибка: ' + error.message)
-                    } else {
-                        await loadDonations()
-                        await loadStats()
-                    }
+                if (!confirm('Подтвердить все ожидающие донаты?')) return
+                try {
+                    await window.sbpApi.request('/api/donations/confirm-all', { method: 'POST' })
+                    await loadDonations()
+                    await loadStats()
+                } catch (error) {
+                    alert(error.message)
                 }
             }
             
@@ -508,23 +414,14 @@
             
             // Добавляем глобальную функцию для отладки
             window.debugProfile = async () => {
-                const { data: profile } = await window.supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', currentUser.id)
-                    .single()
-                console.log('Профиль:', profile)
-                alert(`Профиль: ${JSON.stringify(profile, null, 2)}`)
+                const profile = await window.sbpApi.request('/api/profiles/me')
+                alert(JSON.stringify(profile, null, 2))
             }
         });
         
-        // Выход из системы (вынесено наружу, так как вызывается из onclick)
         async function logout() {
-            if (window.supabase) {
-                await window.supabase.auth.signOut();
-            }
-            const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-            window.location.href = basePath + '/login.html';
+            window.sbpApi.setToken(null)
+            window.location.href = window.sbpApi.page('login.html')
         }
         
         window.logout = logout;

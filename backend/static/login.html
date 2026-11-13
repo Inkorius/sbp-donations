@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>SBP Donations</title>
+    <style>
+        body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }
+        button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; }
+        .error { color: red; margin-top: 10px; }
+        .success { color: green; }
+        .top { display: flex; justify-content: space-between; align-items: center; }
+        .lang-switch button { padding: 6px 10px; cursor: pointer; }
+        .lang-switch button.active { background: #7c4dff; color: white; border: 0; }
+        a { color: #7c4dff; }
+    </style>
+</head>
+<body>
+    <div class="top">
+        <a href="index.html" data-i18n="nav.home">На главную</a>
+        <div class="lang-switch">
+            <button type="button" data-set-lang="ru">RU</button>
+            <button type="button" data-set-lang="en">EN</button>
+        </div>
+    </div>
+    <h2 id="form-title" data-i18n="login.title">Вход</h2>
+    <div id="message"></div>
+
+    <form id="auth-form">
+        <div class="form-group">
+            <label data-i18n="login.email">Email</label>
+            <input type="email" id="email" required>
+        </div>
+        <div class="form-group">
+            <label data-i18n="login.password">Пароль</label>
+            <input type="password" id="password" required minlength="6">
+        </div>
+        <button type="submit" id="submit-btn" data-i18n="login.submit">Войти</button>
+    </form>
+
+    <button id="switch-btn" style="margin-top: 15px; background: #666;" data-i18n="login.toRegister">
+        Нет аккаунта? Зарегистрироваться
+    </button>
+
+    <script src="js/i18n.js"></script>
+    <script src="js/api-client.js"></script>
+    <script>
+        let isRegister = false;
+        const form = document.getElementById('auth-form');
+        const switchBtn = document.getElementById('switch-btn');
+        const title = document.getElementById('form-title');
+        const submitBtn = document.getElementById('submit-btn');
+        const messageDiv = document.getElementById('message');
+
+        function paintMode() {
+            title.setAttribute('data-i18n', isRegister ? 'login.registerTitle' : 'login.title');
+            submitBtn.setAttribute('data-i18n', isRegister ? 'login.register' : 'login.submit');
+            switchBtn.setAttribute('data-i18n', isRegister ? 'login.toLogin' : 'login.toRegister');
+            window.sbpI18n.apply();
+        }
+
+        switchBtn.onclick = () => {
+            isRegister = !isRegister;
+            messageDiv.textContent = '';
+            paintMode();
+        };
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            messageDiv.className = '';
+            messageDiv.textContent = window.sbpI18n.t('login.processing');
+            try {
+                const path = isRegister ? '/api/auth/register' : '/api/auth/login';
+                const data = await window.sbpApi.request(path, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+                window.sbpApi.setToken(data.token);
+                messageDiv.className = 'success';
+                messageDiv.textContent = window.sbpI18n.t(isRegister ? 'login.registered' : 'login.ok');
+                setTimeout(() => {
+                    window.location.href = window.sbpApi.page('dashboard.html');
+                }, 700);
+            } catch (error) {
+                messageDiv.className = 'error';
+                messageDiv.textContent = error.message;
+            }
+        };
+    </script>
+</body>
+</html>

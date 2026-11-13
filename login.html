@@ -2,102 +2,94 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Вход - SBP Donations</title>
+    <title>SBP Donations</title>
     <style>
         body { font-family: Arial; max-width: 400px; margin: 50px auto; padding: 20px; }
         .form-group { margin-bottom: 15px; }
-        input { width: 100%; padding: 8px; margin-top: 5px; }
+        input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }
         button { padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer; }
         .error { color: red; margin-top: 10px; }
         .success { color: green; }
+        .top { display: flex; justify-content: space-between; align-items: center; }
+        .lang-switch button { padding: 6px 10px; cursor: pointer; }
+        .lang-switch button.active { background: #7c4dff; color: white; border: 0; }
+        a { color: #7c4dff; }
     </style>
 </head>
 <body>
-    <h2 id="form-title">Вход</h2>
+    <div class="top">
+        <a href="index.html" data-i18n="nav.home">На главную</a>
+        <div class="lang-switch">
+            <button type="button" data-set-lang="ru">RU</button>
+            <button type="button" data-set-lang="en">EN</button>
+        </div>
+    </div>
+    <h2 id="form-title" data-i18n="login.title">Вход</h2>
     <div id="message"></div>
-    
+
     <form id="auth-form">
         <div class="form-group">
-            <label>Email:</label>
+            <label data-i18n="login.email">Email</label>
             <input type="email" id="email" required>
         </div>
         <div class="form-group">
-            <label>Пароль:</label>
+            <label data-i18n="login.password">Пароль</label>
             <input type="password" id="password" required minlength="6">
         </div>
-        <button type="submit" id="submit-btn">Войти</button>
+        <button type="submit" id="submit-btn" data-i18n="login.submit">Войти</button>
     </form>
-    
-    <button id="switch-btn" style="margin-top: 15px; background: #666;">
+
+    <button id="switch-btn" style="margin-top: 15px; background: #666;" data-i18n="login.toRegister">
         Нет аккаунта? Зарегистрироваться
     </button>
 
-    <!-- Подключаем Supabase через CDN -->
-    <script src="js/supabase-cdn.js"></script>
-    
+    <script src="js/i18n.js"></script>
+    <script src="js/api-client.js"></script>
     <script>
-        let isRegister = false
-        const form = document.getElementById('auth-form')
-        const switchBtn = document.getElementById('switch-btn')
-        const title = document.getElementById('form-title')
-        const submitBtn = document.getElementById('submit-btn')
-        const messageDiv = document.getElementById('message')
-        
-        // Переключение между входом и регистрацией
-        switchBtn.onclick = () => {
-            isRegister = !isRegister
-            title.textContent = isRegister ? 'Регистрация' : 'Вход'
-            submitBtn.textContent = isRegister ? 'Зарегистрироваться' : 'Войти'
-            switchBtn.textContent = isRegister ? 'Уже есть аккаунт? Войти' : 'Нет аккаунта? Зарегистрироваться'
-            messageDiv.textContent = ''
-        }
-        
-        // Обработка формы
-        form.onsubmit = async (e) => {
-            e.preventDefault()
-            const email = document.getElementById('email').value
-            const password = document.getElementById('password').value
-            
-            messageDiv.className = ''
-            messageDiv.textContent = 'Обработка...'
-            
-            try {
-                if (isRegister) {
-                    // Регистрация
-                    const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-                    const redirectTo = window.location.origin + basePath + '/dashboard.html';
+        let isRegister = false;
+        const form = document.getElementById('auth-form');
+        const switchBtn = document.getElementById('switch-btn');
+        const title = document.getElementById('form-title');
+        const submitBtn = document.getElementById('submit-btn');
+        const messageDiv = document.getElementById('message');
 
-                    const { data, error } = await window.supabase.auth.signUp({
-                        email,
-                        password,
-                        options: {
-                            data: { username: email.split('@')[0] },
-                            emailRedirectTo: redirectTo
-                        }
-                    })
-                        
-                    if (error) throw error
-                    messageDiv.className = 'success'
-                    messageDiv.textContent = 'Регистрация успешна! Проверьте почту для подтверждения.'
-                    form.reset()
-                } else {
-                    // Вход
-                    const { data, error } = await window.supabase.auth.signInWithPassword({
-                        email,
-                        password
-                    })
-                    
-                    if (error) throw error
-                    messageDiv.className = 'success'
-                    messageDiv.textContent = 'Вход успешен! Перенаправляем...'
-                    const basePath = window.location.hostname === 'localhost' ? '' : '/sbp-donations';
-                    setTimeout(() => window.location.href = basePath + '/dashboard.html', 1000)
-                }
-            } catch (error) {
-                messageDiv.className = 'error'
-                messageDiv.textContent = `Ошибка: ${error.message}`
-            }
+        function paintMode() {
+            title.setAttribute('data-i18n', isRegister ? 'login.registerTitle' : 'login.title');
+            submitBtn.setAttribute('data-i18n', isRegister ? 'login.register' : 'login.submit');
+            switchBtn.setAttribute('data-i18n', isRegister ? 'login.toLogin' : 'login.toRegister');
+            window.sbpI18n.apply();
         }
+
+        switchBtn.onclick = () => {
+            isRegister = !isRegister;
+            messageDiv.textContent = '';
+            paintMode();
+        };
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            messageDiv.className = '';
+            messageDiv.textContent = window.sbpI18n.t('login.processing');
+            try {
+                const path = isRegister ? '/api/auth/register' : '/api/auth/login';
+                const data = await window.sbpApi.request(path, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+                window.sbpApi.setToken(data.token);
+                messageDiv.className = 'success';
+                messageDiv.textContent = window.sbpI18n.t(isRegister ? 'login.registered' : 'login.ok');
+                setTimeout(() => {
+                    window.location.href = window.sbpApi.page('dashboard.html');
+                }, 700);
+            } catch (error) {
+                messageDiv.className = 'error';
+                messageDiv.textContent = error.message;
+            }
+        };
     </script>
 </body>
 </html>

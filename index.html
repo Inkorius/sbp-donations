@@ -2,46 +2,51 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>SBP Donations - Главная</title>
+    <title>SBP Donations</title>
     <style>
         body { font-family: Arial; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
         h1 { color: #7c4dff; }
         h2 { color: #651fff; margin-top: 30px; }
-        nav { margin: 20px 0; }
-        nav a { background: #7c4dff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; margin-right: 10px; }
+        nav { margin: 20px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        nav a { background: #7c4dff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; }
         nav a:hover { background: #651fff; }
         ul { margin-left: 20px; }
         li { margin-bottom: 10px; }
         .status { padding: 10px; border-radius: 5px; margin: 5px 0; }
         .status-done { background: #d4edda; color: #155724; }
         .status-dev { background: #fff3cd; color: #856404; }
+        .lang-switch { margin-left: auto; }
+        .lang-switch button { padding: 8px 12px; border: 1px solid #7c4dff; background: white; color: #7c4dff; cursor: pointer; border-radius: 4px; }
+        .lang-switch button.active { background: #7c4dff; color: white; }
     </style>
 </head>
 <body>
-    <h1>SBP Donations</h1>
-    <p>🚀 Система приёма донатов через СБП без посредников</p>
-    
     <nav>
-        <a href="/sbp-donations/login.html">Вход для стримеров</a>
+        <a href="login.html" data-i18n="nav.login">Вход для стримеров</a>
+        <div class="lang-switch">
+            <button type="button" data-set-lang="ru">RU</button>
+            <button type="button" data-set-lang="en">EN</button>
+        </div>
     </nav>
-    
-    <h2>📌 Как это работает:</h2>
-    <ul>
-        <li>1. Стример регистрируется и загружает свой QR-код СБП</li>
-        <li>2. Стример получает уникальную ссылку для донатов</li>
-        <li>3. Зрители переходят по ссылке, сканируют QR-код и делают перевод</li>
-        <li>4. Зритель уведомляет стримера о переводе через форму</li>
-        <li>5. Стример видит донаты в своей панели управления</li>
-    </ul>
-    
-    <h2>🔧 Статус системы:</h2>
-    <div class="status status-done">✅ Базовая система работает</div>
-    <div class="status status-done">✅ Авторизация и регистрация</div>
-    <div class="status status-done">✅ Загрузка QR-кодов</div>
-    <div class="status status-done">✅ Приём донатов</div>
-    <div class="status status-dev">🔜 OBS интеграция (в разработке)</div>
 
-    <!-- Подключаем Supabase через CDN -->
-    <script src="js/supabase-cdn.js"></script>
+    <h1 data-i18n="brand.title">SBP Donations</h1>
+    <p data-i18n="brand.tagline">Приём донатов через СБП без посредников</p>
+
+    <h2 data-i18n="home.how">Как это работает</h2>
+    <ul>
+        <li data-i18n="home.step1">Стример регистрируется и загружает QR-код СБП</li>
+        <li data-i18n="home.step2">Стример получает ссылку для донатов</li>
+        <li data-i18n="home.step3">Зритель переходит по ссылке, сканирует QR и переводит деньги</li>
+        <li data-i18n="home.step4">Зритель уведомляет стримера через форму</li>
+        <li data-i18n="home.step5">Стример видит донаты в панели управления</li>
+    </ul>
+
+    <h2 data-i18n="home.status">Статус</h2>
+    <div class="status status-done" data-i18n="home.status.api">Свой сервер и база данных работают</div>
+    <div class="status status-done" data-i18n="home.status.auth">Регистрация и вход</div>
+    <div class="status status-done" data-i18n="home.status.site">Сайт снова открывается с этой страницы, не из /docs</div>
+    <div class="status status-dev" data-i18n="home.status.obs">OBS-оверлей — следующий шаг</div>
+
+    <script src="js/i18n.js"></script>
 </body>
 </html>
