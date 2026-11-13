@@ -141,6 +141,103 @@ def create_token(user_id: UUID) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
+SCHEMA_STATEMENTS = [
+    "CREATE EXTENSION IF NOT EXISTS pgcrypto",
+    """
+    CREATE TABLE IF NOT EXISTS users (
+      id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      email           TEXT UNIQUE NOT NULL,
+      password_hash   TEXT NOT NULL,
+      email_verified  BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS email_verification_tokens (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS profiles (
+      id           UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      username     TEXT UNIQUE NOT NULL,
+      display_name TEXT,
+      description  TEXT,
+      sber_qr_url  TEXT,
+      avatar_url   TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS donations (
+      id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      profile_id     UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+      donor_name     TEXT NOT NULL,
+      amount         NUMERIC(12, 2) NOT NULL CHECK (amount >= 0),
+      message        TEXT,
+      status         TEXT NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'confirmed', 'rejected', 'refunded')),
+      payment_ref    TEXT,
+      payment_source TEXT NOT NULL DEFAULT 'manual',
+      matched_at     TIMESTAMPTZ,
+      confirmed_at   TIMESTAMPTZ,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_donations_profile_created
+      ON donations (profile_id, created_at DESC)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_donations_profile_status
+      ON donations (profile_id, status)
+    """,
+    """
+    CREATE OR REPLACE FUNCTION notify_donation_change()
+    RETURNS TRIGGER AS $$
+    BEGIN
+      PERFORM pg_notify(
+        'donation_events',
+        json_build_object(
+          'op', TG_OP,
+          'id', NEW.id,
+          'profile_id', NEW.profile_id,
+          'status', NEW.status,
+          'donor_name', NEW.donor_name,
+          'amount', NEW.amount,
+          'message', NEW.message,
+          'created_at', NEW.created_at
+        )::text
+      );
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS trg_donation_notify ON donations",
+    """
+    CREATE TRIGGER trg_donation_notify
+      AFTER INSERT OR UPDATE OF status ON donations
+      FOR EACH ROW
+      EXECUTE FUNCTION notify_donation_change()
+    """,
+]
+
+
+async def init_schema(db: asyncpg.Pool) -> None:
+    db_name = await db.fetchval("SELECT current_database()")
+    logging.info("Connected to database: %s", db_name)
+    async with db.acquire() as conn:
+        for statement in SCHEMA_STATEMENTS:
+            await conn.execute(statement)
+    logging.info("Database schema is ready")
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global pool
@@ -152,6 +249,7 @@ async def lifespan(_app: FastAPI):
     if ssl is not None:
         pool_kwargs["ssl"] = ssl
     pool = await asyncpg.create_pool(**pool_kwargs)
+    await init_schema(pool)
     try:
         yield
     finally:
