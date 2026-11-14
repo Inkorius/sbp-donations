@@ -48,6 +48,7 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
+            position: relative;
         }
 
         .right-section {
@@ -262,6 +263,15 @@
             color: #333;
         }
 
+        .donate-lang {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            z-index: 2;
+            display: flex;
+            gap: 6px;
+        }
+
         .steps {
             display: flex;
             justify-content: space-between;
@@ -335,14 +345,12 @@
 <body>
     <div class="donation-container">
         <div class="left-section">
+            <div class="donate-lang">
+                <button type="button" data-set-lang="ru">RU</button>
+                <button type="button" data-set-lang="en">EN</button>
+            </div>
             <div class="logo">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-                    <h1><span class="heart">❤</span> SBP Donations</h1>
-                    <div>
-                        <button type="button" data-set-lang="ru" style="padding:6px 10px;">RU</button>
-                        <button type="button" data-set-lang="en" style="padding:6px 10px;">EN</button>
-                    </div>
-                </div>
+                <h1><span class="heart">❤</span> SBP Donations</h1>
                 <p class="streamer-description" data-i18n="donate.subtitle">Поддержка стримера напрямую</p>
             </div>
             
