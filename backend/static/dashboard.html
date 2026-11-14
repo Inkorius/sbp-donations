@@ -86,6 +86,11 @@
         .notice-box h3 { margin: 0 0 10px; }
         .notice-box p { margin: 0 0 16px; }
         .notice-box button { background: #fff; color: #222; }
+        .toggle-btn { background: #9e9e9e; }
+        .toggle-btn.on { background: #4CAF50; }
+        .obs-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0; }
+        .obs-row label { font-weight: bold; }
+        .obs-row select { padding: 8px; }
     </style>
 </head>
 <body>
@@ -178,7 +183,36 @@
 
     <div class="section" id="obs-section">
         <h2 data-i18n="dash.obs">OBS-оверлей</h2>
-        <p data-i18n="dash.obs.hint">В OBS: Источники → Браузер. Вставьте эту ссылку. Ширина 1920, высота 1080. Фон страницы прозрачный.</p>
+        <p data-i18n="dash.obs.hint">OBS → Источники → Браузер. Вставьте ссылку ниже. Ширина 1920, высота 1080. В OBS у источника включите звук (не mute).</p>
+        <div class="obs-row">
+            <button type="button" id="obs-tts-btn" class="toggle-btn">Озвучка: выкл</button>
+            <button type="button" id="obs-debug-btn" class="toggle-btn">Дебаг режим: выкл</button>
+        </div>
+        <div class="obs-row">
+            <label for="obs-font" data-i18n="dash.obs.font">Шрифт</label>
+            <select id="obs-font">
+                <option value="Arial">Arial</option>
+                <option value="Impact">Impact</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Tahoma">Tahoma</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Comic Sans MS">Comic Sans MS</option>
+                <option value="Unbounded">Unbounded</option>
+                <option value="Montserrat">Montserrat</option>
+                <option value="Rubik">Rubik</option>
+            </select>
+            <label for="obs-size" data-i18n="dash.obs.size">Размер текста</label>
+            <select id="obs-size">
+                <option value="32">32</option>
+                <option value="40">40</option>
+                <option value="48">48</option>
+                <option value="56" selected>56</option>
+                <option value="64">64</option>
+                <option value="72">72</option>
+                <option value="96">96</option>
+            </select>
+        </div>
         <div class="donate-link" id="obs-link"></div>
         <button id="copy-obs-btn" class="copy-btn" data-i18n="dash.obs.copy">Скопировать ссылку для OBS</button>
     </div>
@@ -227,6 +261,16 @@
             const lookStatusEl = document.getElementById('look-status')
             const obsLinkEl = document.getElementById('obs-link')
             const copyObsBtn = document.getElementById('copy-obs-btn')
+            const obsTtsBtn = document.getElementById('obs-tts-btn')
+            const obsDebugBtn = document.getElementById('obs-debug-btn')
+            const obsFontEl = document.getElementById('obs-font')
+            const obsSizeEl = document.getElementById('obs-size')
+            const obsSettings = {
+                tts: localStorage.getItem('sbp_obs_tts') === '1',
+                debug: localStorage.getItem('sbp_obs_debug') === '1',
+                font: localStorage.getItem('sbp_obs_font') || 'Arial',
+                size: localStorage.getItem('sbp_obs_size') || '56',
+            }
             const noticeOverlay = document.getElementById('notice-overlay')
             const noticeText = document.getElementById('notice-text')
             const noticeOk = document.getElementById('notice-ok')
@@ -274,6 +318,29 @@
             uploadBtn.addEventListener('click', uploadQR)
             copyLinkBtn.addEventListener('click', copyDonateLink)
             copyObsBtn.addEventListener('click', copyObsLink)
+            obsTtsBtn.addEventListener('click', () => {
+                obsSettings.tts = !obsSettings.tts
+                localStorage.setItem('sbp_obs_tts', obsSettings.tts ? '1' : '0')
+                refreshObsLink()
+            })
+            obsDebugBtn.addEventListener('click', () => {
+                obsSettings.debug = !obsSettings.debug
+                localStorage.setItem('sbp_obs_debug', obsSettings.debug ? '1' : '0')
+                refreshObsLink()
+            })
+            obsFontEl.addEventListener('change', () => {
+                obsSettings.font = obsFontEl.value
+                localStorage.setItem('sbp_obs_font', obsSettings.font)
+                refreshObsLink()
+            })
+            obsSizeEl.addEventListener('change', () => {
+                obsSettings.size = obsSizeEl.value
+                localStorage.setItem('sbp_obs_size', obsSettings.size)
+                refreshObsLink()
+            })
+            obsFontEl.value = obsSettings.font
+            obsSizeEl.value = obsSettings.size
+            refreshObsLink()
             confirmAllBtn.addEventListener('click', confirmAllPending)
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
@@ -355,7 +422,7 @@
                         donateLinkEl.textContent = donateLink
                         donateLinkContainer.style.display = 'block'
                         noUsernameEl.style.display = 'none'
-                        obsLinkEl.textContent = `${window.location.origin}${window.sbpApi.page('obs-overlay.html')}?user=${profile.username}`
+                        refreshObsLink()
                     } else {
                         donateLinkContainer.style.display = 'none'
                         noUsernameEl.style.display = 'block'
@@ -761,6 +828,30 @@
             }
             
             // Копирование ссылки
+            function paintObsToggles() {
+                const t = window.sbpI18n.t
+                obsTtsBtn.textContent = t('dash.obs.tts') + ': ' + t(obsSettings.tts ? 'dash.obs.on' : 'dash.obs.off')
+                obsDebugBtn.textContent = t('dash.obs.debug') + ': ' + t(obsSettings.debug ? 'dash.obs.on' : 'dash.obs.off')
+                obsTtsBtn.classList.toggle('on', obsSettings.tts)
+                obsDebugBtn.classList.toggle('on', obsSettings.debug)
+            }
+
+            function refreshObsLink() {
+                paintObsToggles()
+                const username = (currentProfile && currentProfile.username) || (currentUser && currentUser.username)
+                if (!username) {
+                    obsLinkEl.textContent = ''
+                    return
+                }
+                const params = new URLSearchParams()
+                params.set('user', username)
+                params.set('font', obsSettings.font)
+                params.set('size', obsSettings.size)
+                if (obsSettings.tts) params.set('tts', '1')
+                if (obsSettings.debug) params.set('debug', '1')
+                obsLinkEl.textContent = `${window.location.origin}${window.sbpApi.page('obs-overlay.html')}?${params.toString()}`
+            }
+
             async function copyObsLink() {
                 const link = obsLinkEl.textContent
                 try {
@@ -800,6 +891,7 @@
             document.addEventListener('language-changed', () => {
                 if (currentProfile) loadProfile()
                 loadDonations()
+                paintObsToggles()
             })
             
             // Добавляем глобальную функцию для отладки

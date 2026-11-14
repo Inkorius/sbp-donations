@@ -219,7 +219,7 @@
             size: parseInt(urlParams.get('size')) || 56,
             color: '#' + (urlParams.get('color') || 'ffffff').replace('#', ''),
             theme: urlParams.get('theme') || 'default',
-            debug: urlParams.has('debug'),
+            debug: urlParams.has('debug') && urlParams.get('debug') !== '0',
             useRealtime: !urlParams.has('no-realtime')
         };
 
@@ -240,15 +240,15 @@
         document.addEventListener('DOMContentLoaded', initializeOverlay);
 
         async function initializeOverlay() {
-            document.body.style.fontFamily = config.font;
+            const fontName = (config.font || 'Arial').replace(/["']/g, '').trim();
+            document.body.style.fontFamily = '"' + fontName + '", sans-serif';
             document.body.style.setProperty('--overlay-size', config.size + 'px');
             document.body.style.setProperty('--overlay-color', config.color);
-            if (config.font && !config.font.includes(',') && !config.font.includes(' ')) {
+            if (['Unbounded', 'Montserrat', 'Rubik'].includes(fontName)) {
                 const fontLink = document.createElement('link');
                 fontLink.rel = 'stylesheet';
-                fontLink.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(config.font) + ':wght@600;800&display=swap';
+                fontLink.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(fontName) + ':wght@600;800&display=swap';
                 document.head.appendChild(fontLink);
-                document.body.style.fontFamily = '"' + config.font + '", sans-serif';
             }
             updateStatus('Поиск стримера...');
             if (config.debug) {
@@ -424,6 +424,13 @@
         const ttsQueue = [];
         let ttsBusy = false;
 
+        if (window.speechSynthesis) {
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.addEventListener('voiceschanged', () => {
+                window.speechSynthesis.getVoices();
+            });
+        }
+
         function speakDonation(donation) {
             if (!config.tts || !window.speechSynthesis) return;
             const amount = formatAmount(donation.amount);
@@ -435,8 +442,11 @@
         function playNextTts() {
             if (ttsBusy || !ttsQueue.length) return;
             ttsBusy = true;
+            window.speechSynthesis.resume();
             const utterance = new SpeechSynthesisUtterance(ttsQueue.shift());
             utterance.lang = 'ru-RU';
+            const voice = window.speechSynthesis.getVoices().find((item) => item.lang && item.lang.toLowerCase().startsWith('ru'));
+            if (voice) utterance.voice = voice;
             utterance.rate = 1;
             utterance.onend = () => {
                 ttsBusy = false;
