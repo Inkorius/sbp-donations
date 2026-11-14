@@ -186,6 +186,8 @@
 <body>
     <!-- Контейнер для донатов -->
     <div id="donations-container"></div>
+    <audio id="alert-player" preload="auto" playsinline></audio>
+    <audio id="voice-player" preload="auto" playsinline></audio>
 
     <!-- Статус подключения -->
     <div class="connection-status" id="connection-status">
@@ -229,7 +231,7 @@
         const seenDonationIds = new Set();
         let currentTheme = config.theme;
         let connectionMode = 'initializing';
-        let lastCheckTime = new Date().toISOString();
+        let lastCheckMs = Date.now();
         let pollingInterval = null;
         let overlaySocket = null;
         let alertSoundUrl = null;
@@ -284,16 +286,10 @@
                     'success'
                 );
                 document.body.classList.add('theme-' + currentTheme);
-                lastCheckTime = new Date().toISOString();
+                lastCheckMs = Date.now();
 
-                if (config.useRealtime) {
-                    setupRealtime(profile.id);
-                    setTimeout(() => {
-                        if (connectionMode !== 'realtime') setupPolling(profile.id);
-                    }, 4000);
-                } else {
-                    setupPolling(profile.id);
-                }
+                setupPolling(profile.id);
+                if (config.useRealtime) setupRealtime(profile.id);
             } catch (error) {
                 updateStatus('Стример не найден', 'error');
                 showErrorMessage('Стример "' + config.username + '" не найден');
@@ -308,12 +304,8 @@
 
             socket.onopen = () => {
                 connectionMode = 'realtime';
-                document.getElementById('mode').textContent = 'WebSocket';
+                document.getElementById('mode').textContent = 'WebSocket + опрос';
                 updateStatus('Оверлей подключен', 'success');
-                if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                    pollingInterval = null;
-                }
             };
             socket.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
@@ -330,23 +322,21 @@
         }
 
         function setupPolling(profileId) {
-            if (connectionMode === 'polling') return;
-            connectionMode = 'polling';
-            document.getElementById('mode').textContent = 'Polling';
-            updateStatus('Резервный опрос каждые 3 секунды', 'warning');
-            if (pollingInterval) clearInterval(pollingInterval);
+            if (pollingInterval) return;
+            document.getElementById('mode').textContent = connectionMode === 'realtime' ? 'WebSocket + опрос' : 'Опрос';
 
             async function checkNewDonations() {
                 try {
-                    const rows = await fetch(apiUrl('/api/donations?profile_id=' + encodeURIComponent(profileId) + '&since=' + encodeURIComponent(lastCheckTime) + '&limit=50')).then((r) => r.json());
-                    if (!Array.isArray(rows) || !rows.length) return;
+                    const res = await fetch(apiUrl('/api/donations?profile_id=' + encodeURIComponent(profileId) + '&since_ms=' + lastCheckMs + '&limit=50'));
+                    const rows = await res.json();
+                    if (!res.ok || !Array.isArray(rows) || !rows.length) return;
                     rows.forEach((donation) => addDonation(donation));
-                    lastCheckTime = new Date().toISOString();
+                    lastCheckMs = Date.now();
                 } catch (error) {
                     console.error(error);
                 }
             }
-            pollingInterval = setInterval(checkNewDonations, 3000);
+            pollingInterval = setInterval(checkNewDonations, 2000);
             checkNewDonations();
         }
 
@@ -369,44 +359,44 @@
             try { node.start(); } catch (err) {}
         }
 
-        async function playAudio(src) {
+        function donationSpeechText(donation) {
+            const amount = formatAmount(donation.amount);
+            const message = donation.message ? '. ' + donation.message : '';
+            return ((donation.donor_name || 'Кто-то') + ' задонатил ' + amount + ' рублей' + message).slice(0, 500);
+        }
+
+        function playThroughElement(player, src, maxMs) {
+            return new Promise((resolve) => {
+                if (!player || !src) {
+                    resolve();
+                    return;
+                }
+                let finished = false;
+                const finish = () => {
+                    if (finished) return;
+                    finished = true;
+                    player.onended = null;
+                    player.onerror = null;
+                    resolve();
+                };
+                player.pause();
+                player.muted = false;
+                player.volume = 1;
+                player.src = src;
+                player.onended = finish;
+                player.onerror = finish;
+                player.play().catch(() => {
+                    setTimeout(() => player.play().catch(finish), 300);
+                });
+                setTimeout(finish, maxMs || 20000);
+            });
+        }
+
+        async function playAudio(src, player) {
             if (!src) return;
             await unlockAudio();
-            let bytes;
-            try {
-                const res = await fetch(src, { cache: 'no-store' });
-                if (!res.ok) {
-                    updateStatus('Звук не получен: HTTP ' + res.status, 'error');
-                    return;
-                }
-                bytes = await res.arrayBuffer();
-            } catch (err) {
-                updateStatus('Звук не загрузился', 'error');
-                return;
-            }
-            if (sharedAudioCtx) {
-                try {
-                    const decoded = await sharedAudioCtx.decodeAudioData(bytes.slice(0));
-                    await new Promise((resolve) => {
-                        const node = sharedAudioCtx.createBufferSource();
-                        node.buffer = decoded;
-                        node.connect(sharedAudioCtx.destination);
-                        node.onended = resolve;
-                        node.start();
-                    });
-                    return;
-                } catch (err) {
-                    console.log(err);
-                }
-            }
-            const blobUrl = URL.createObjectURL(new Blob([bytes]));
-            await new Promise((resolve) => {
-                const audio = new Audio(blobUrl);
-                audio.volume = 1;
-                audio.addEventListener('ended', () => { URL.revokeObjectURL(blobUrl); resolve(); }, { once: true });
-                audio.addEventListener('error', () => { URL.revokeObjectURL(blobUrl); resolve(); }, { once: true });
-                audio.play().catch(() => { URL.revokeObjectURL(blobUrl); resolve(); });
-            });
+            const el = player || document.getElementById('voice-player');
+            await playThroughElement(el, src, player && player.id === 'alert-player' ? 8000 : 20000);
         }
 
         function addDonation(donation) {
@@ -421,16 +411,25 @@
             overlayBusy = true;
             while (pendingDonations.length) {
                 const donation = pendingDonations.shift();
-                await sleep(5000);
-                if (alertSoundUrl) {
-                    await playAudio(alertSoundUrl);
+                const ttsUrl = config.tts
+                    ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)))
+                    : null;
+                const waitAndPrepare = [sleep(5000)];
+                if (ttsUrl) {
+                    const voicePlayer = document.getElementById('voice-player');
+                    voicePlayer.src = ttsUrl;
+                    voicePlayer.load();
                 }
-                await presentDonation(donation);
+                await Promise.all(waitAndPrepare);
+                if (alertSoundUrl) {
+                    await playAudio(alertSoundUrl, document.getElementById('alert-player'));
+                }
+                await presentDonation(donation, ttsUrl);
             }
             overlayBusy = false;
         }
 
-        async function presentDonation(donation) {
+        async function presentDonation(donation, ttsUrl) {
             donationsCount++;
             document.getElementById('counter').textContent = donationsCount;
 
@@ -457,7 +456,10 @@
             }
 
             donationEl.style.animation = `${config.animation} ${config.duration}ms forwards`;
-            await Promise.all([speakDonation(donation), sleep(config.duration)]);
+            await Promise.all([
+                ttsUrl ? playAudio(ttsUrl, document.getElementById('voice-player')) : Promise.resolve(),
+                sleep(config.duration),
+            ]);
 
             const index = donationsQueue.indexOf(donationEl);
             if (index > -1) donationsQueue.splice(index, 1);
@@ -479,14 +481,6 @@
 
         function formatAmount(amount) {
             return parseFloat(amount).toFixed(0);
-        }
-
-        async function speakDonation(donation) {
-            if (!config.tts) return;
-            const amount = formatAmount(donation.amount);
-            const message = donation.message ? '. ' + donation.message : '';
-            const text = ((donation.donor_name || 'Кто-то') + ' задонатил ' + amount + ' рублей' + message).slice(0, 500);
-            await playAudio(apiUrl('/api/tts?text=' + encodeURIComponent(text)));
         }
 
         function updateStatus(message, type = 'info') {

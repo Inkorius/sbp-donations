@@ -842,8 +842,14 @@ async def list_donations(
     profile_id: UUID = Query(...),
     limit: int = Query(20, ge=1, le=100),
     since: Optional[datetime] = Query(default=None),
+    since_ms: Optional[int] = Query(default=None),
 ) -> list[DonationOut]:
-    if since:
+    cutoff = None
+    if since_ms is not None:
+        cutoff = datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc)
+    elif since is not None:
+        cutoff = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
+    if cutoff:
         rows = await pool.fetch(
             """
             SELECT id, profile_id, donor_name, amount, message, status, created_at
@@ -853,7 +859,7 @@ async def list_donations(
             LIMIT $3
             """,
             profile_id,
-            since,
+            cutoff,
             limit,
         )
     else:
