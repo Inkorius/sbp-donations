@@ -43,6 +43,28 @@
         .look-grid input[type="text"], .look-grid textarea { width: 100%; padding: 8px; box-sizing: border-box; }
         .avatar-preview { width: 96px; height: 96px; border-radius: 50%; overflow: hidden; border: 2px solid #ddd; }
         .avatar-preview img, .avatar-preview div { width: 100%; height: 100%; object-fit: cover; }
+        .notice-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .notice-overlay.open { display: flex; }
+        .notice-box {
+            background: #222;
+            color: #fff;
+            padding: 24px 28px;
+            border-radius: 12px;
+            min-width: 280px;
+            max-width: 90%;
+            text-align: center;
+        }
+        .notice-box h3 { margin: 0 0 10px; }
+        .notice-box p { margin: 0 0 16px; }
+        .notice-box button { background: #fff; color: #222; }
     </style>
 </head>
 <body>
@@ -78,6 +100,14 @@
         <button id="upload-avatar-btn" data-i18n="dash.avatar.upload">Загрузить фото</button>
         <button id="clear-avatar-btn" data-i18n="dash.avatar.clear">Убрать фото</button>
         <div id="look-status" style="margin-top: 10px;"></div>
+    </div>
+
+    <div id="notice-overlay" class="notice-overlay">
+        <div class="notice-box">
+            <h3 data-i18n="notice.title">Уведомление</h3>
+            <p id="notice-text"></p>
+            <button type="button" id="notice-ok" data-i18n="notice.ok">Закрыть</button>
+        </div>
     </div>
 
     <div class="stats" id="stats">
@@ -159,6 +189,10 @@
             const uploadAvatarBtn = document.getElementById('upload-avatar-btn')
             const clearAvatarBtn = document.getElementById('clear-avatar-btn')
             const lookStatusEl = document.getElementById('look-status')
+            const noticeOverlay = document.getElementById('notice-overlay')
+            const noticeText = document.getElementById('notice-text')
+            const noticeOk = document.getElementById('notice-ok')
+            let pendingAvatarFile = null
             
             // Текущий пользователь и профиль
             let currentUser = null
@@ -190,6 +224,8 @@
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
             clearAvatarBtn.addEventListener('click', clearAvatar)
+            noticeOk.addEventListener('click', () => noticeOverlay.classList.remove('open'))
+            avatarUploadEl.addEventListener('change', previewAvatarFile)
             avatarColorEl.addEventListener('input', () => {
                 if (currentProfile) paintAvatar(Object.assign({}, currentProfile, { avatar_color: avatarColorEl.value, avatar_url: currentProfile.avatar_url }))
             })
@@ -285,22 +321,105 @@
                 }
             }
 
-            async function uploadAvatar() {
+            function showNotice(text) {
+                document.querySelector('#notice-overlay [data-i18n="notice.title"]').textContent = window.sbpI18n.t('notice.title')
+                noticeOk.textContent = window.sbpI18n.t('notice.ok')
+                noticeText.textContent = text
+                noticeOverlay.classList.add('open')
+            }
+
+            function loadImageFromFile(file) {
+                return new Promise((resolve, reject) => {
+                    const url = URL.createObjectURL(file)
+                    const img = new Image()
+                    img.onload = () => {
+                        URL.revokeObjectURL(url)
+                        resolve(img)
+                    }
+                    img.onerror = () => {
+                        URL.revokeObjectURL(url)
+                        reject(new Error(window.sbpI18n.t('dash.avatar.badImage')))
+                    }
+                    img.src = url
+                })
+            }
+
+            function cropCenterSquare(img, size) {
+                const canvas = document.createElement('canvas')
+                canvas.width = size
+                canvas.height = size
+                const ctx = canvas.getContext('2d')
+                const side = Math.min(img.naturalWidth, img.naturalHeight)
+                const sx = (img.naturalWidth - side) / 2
+                const sy = (img.naturalHeight - side) / 2
+                ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size)
+                return canvas
+            }
+
+            function canvasToJpegFile(canvas, maxBytes) {
+                return new Promise((resolve, reject) => {
+                    const tryQuality = (quality) => {
+                        canvas.toBlob((blob) => {
+                            if (!blob) {
+                                reject(new Error(window.sbpI18n.t('dash.avatar.badImage')))
+                                return
+                            }
+                            if (blob.size > maxBytes && quality > 0.45) {
+                                tryQuality(Math.max(0.45, quality - 0.1))
+                                return
+                            }
+                            resolve(new File([blob], 'avatar.jpg', { type: 'image/jpeg' }))
+                        }, 'image/jpeg', quality)
+                    }
+                    tryQuality(0.9)
+                })
+            }
+
+            async function prepareCircleAvatar(file) {
+                const img = await loadImageFromFile(file)
+                const size = Math.min(512, Math.max(img.naturalWidth, img.naturalHeight, 256))
+                const canvas = cropCenterSquare(img, Math.min(512, size))
+                return canvasToJpegFile(canvas, 2 * 1024 * 1024)
+            }
+
+            async function previewAvatarFile() {
                 const file = avatarUploadEl.files[0]
-                if (!file) {
-                    alert(window.sbpI18n.t('dash.qr.choose'))
+                pendingAvatarFile = null
+                if (!file) return
+                try {
+                    lookStatusEl.style.color = '#ff9800'
+                    lookStatusEl.textContent = window.sbpI18n.t('dash.avatar.preparing')
+                    pendingAvatarFile = await prepareCircleAvatar(file)
+                    const previewUrl = URL.createObjectURL(pendingAvatarFile)
+                    avatarPreviewEl.innerHTML = `<img src="${previewUrl}" alt="">`
+                    lookStatusEl.style.color = '#4CAF50'
+                    lookStatusEl.textContent = ''
+                } catch (error) {
+                    pendingAvatarFile = null
+                    lookStatusEl.style.color = '#f44336'
+                    lookStatusEl.textContent = error.message
+                }
+            }
+
+            async function uploadAvatar() {
+                if (!pendingAvatarFile && !avatarUploadEl.files[0]) {
+                    showNotice(window.sbpI18n.t('dash.file.missing'))
                     return
                 }
-                const formData = new FormData()
-                formData.append('file', file)
+                lookStatusEl.style.color = '#ff9800'
+                lookStatusEl.textContent = window.sbpI18n.t('dash.avatar.preparing')
                 try {
+                    const file = pendingAvatarFile || await prepareCircleAvatar(avatarUploadEl.files[0])
+                    const formData = new FormData()
+                    formData.append('file', file, 'avatar.jpg')
                     const profile = await window.sbpApi.request('/api/profiles/me/avatar', {
                         method: 'POST',
                         body: formData,
                     })
                     currentProfile = profile
-                    fillLookForm(profile)
+                    pendingAvatarFile = null
                     avatarUploadEl.value = ''
+                    fillLookForm(profile)
                     lookStatusEl.style.color = '#4CAF50'
                     lookStatusEl.textContent = window.sbpI18n.t('dash.look.saved')
                 } catch (error) {
@@ -353,7 +472,7 @@
             async function uploadQR() {
                 const file = qrUploadInput.files[0]
                 if (!file) {
-                    alert(window.sbpI18n.t('dash.qr.choose'))
+                    showNotice(window.sbpI18n.t('dash.file.missing'))
                     return
                 }
                 
