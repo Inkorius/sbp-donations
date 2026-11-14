@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -732,17 +733,32 @@ async def upload_alert_sound(
 
 
 async def synthesize_speech(text: str) -> bytes:
-    import edge_tts
-
-    chunks: list[bytes] = []
-    communicate = edge_tts.Communicate(text, "ru-RU-DmitryNeural")
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            chunks.append(chunk["data"])
-    data = b"".join(chunks)
-    if not data:
-        raise RuntimeError("empty tts audio")
-    return data
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    path = tmp.name
+    tmp.close()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "espeak-ng",
+            "-v",
+            "ru",
+            "-s",
+            "130",
+            "-w",
+            path,
+            "--stdin",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _stdout, stderr = await asyncio.wait_for(proc.communicate(text.encode("utf-8")), timeout=15)
+        if proc.returncode != 0:
+            raise RuntimeError(stderr.decode("utf-8", errors="replace") or "espeak-ng failed")
+        data = Path(path).read_bytes()
+        if len(data) < 44:
+            raise RuntimeError("empty wav")
+        return data
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 @app.get("/api/tts", summary="Озвучка доната")
@@ -751,13 +767,13 @@ async def overlay_tts(request: Request, text: str = Query(..., min_length=1, max
     if not clean:
         raise HTTPException(status_code=400, detail=msg(request, "tts_fail"))
     try:
-        payload = await asyncio.wait_for(synthesize_speech(clean), timeout=30)
+        payload = await synthesize_speech(clean)
     except Exception as exc:
         logging.exception("TTS failed")
         raise HTTPException(status_code=502, detail=msg(request, "tts_fail")) from exc
     return Response(
         content=payload,
-        media_type="audio/mpeg",
+        media_type="audio/wav",
         headers={
             "Cache-Control": "no-store",
             "Content-Disposition": "inline",

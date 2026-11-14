@@ -5,7 +5,7 @@ COPY . .
 
 WORKDIR /app
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 RUN set -e; \
     if [ -f /tmp/build/backend/requirements.txt ]; then \
