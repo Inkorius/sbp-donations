@@ -51,6 +51,7 @@ TEXTS = {
         "qr_missing": "Выберите файл с QR-кодом",
         "qr_type": "Нужно изображение JPG, PNG или WebP",
         "qr_size": "Файл слишком большой. Максимум 2 МБ",
+        "bad_color": "Цвет кружка должен быть в формате #RRGGBB",
         "confirm_own": "Можно менять только свои донаты",
     },
     "en": {
@@ -64,6 +65,7 @@ TEXTS = {
         "qr_missing": "Choose a QR code image",
         "qr_type": "Use a JPG, PNG, or WebP image",
         "qr_size": "File is too large. Maximum size is 2 MB",
+        "bad_color": "Circle color must be in #RRGGBB format",
         "confirm_own": "You can only change your own donations",
     },
 }
@@ -179,6 +181,7 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS description TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sber_qr_url TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_color TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     """
     DO $$
@@ -347,12 +350,15 @@ class ProfileOut(BaseModel):
     description: Optional[str]
     sber_qr_url: Optional[str]
     avatar_url: Optional[str]
+    avatar_color: Optional[str]
     created_at: datetime
 
 
 class ProfileUpdate(BaseModel):
     display_name: Optional[str] = Field(default=None, max_length=100)
     description: Optional[str] = Field(default=None, max_length=500)
+    avatar_color: Optional[str] = Field(default=None, max_length=7)
+    clear_avatar: Optional[bool] = None
 
 
 class DonationCreate(BaseModel):
@@ -377,6 +383,7 @@ class DonationStatusUpdate(BaseModel):
 
 
 def row_to_profile(row: asyncpg.Record) -> ProfileOut:
+    keys = set(row.keys())
     return ProfileOut(
         id=row["id"],
         username=row["username"],
@@ -384,6 +391,7 @@ def row_to_profile(row: asyncpg.Record) -> ProfileOut:
         description=row["description"],
         sber_qr_url=row["sber_qr_url"],
         avatar_url=row["avatar_url"],
+        avatar_color=row["avatar_color"] if "avatar_color" in keys else None,
         created_at=row["created_at"],
     )
 
@@ -546,12 +554,19 @@ async def update_my_profile(
     body: ProfileUpdate,
     user: asyncpg.Record = Depends(current_user),
 ) -> ProfileOut:
+    color = body.avatar_color
+    if color:
+        if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+            raise HTTPException(status_code=400, detail=msg(request, "bad_color"))
+        color = color.lower()
     row = await pool.fetchrow(
         """
         UPDATE profiles
         SET
             display_name = COALESCE($2, display_name),
             description = COALESCE($3, description),
+            avatar_color = COALESCE($4, avatar_color),
+            avatar_url = CASE WHEN $5 THEN NULL ELSE avatar_url END,
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -559,17 +574,19 @@ async def update_my_profile(
         user["id"],
         body.display_name,
         body.description,
+        color,
+        bool(body.clear_avatar),
     )
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
     return row_to_profile(row)
 
 
-@app.post("/api/profiles/me/qr", summary="Загрузить QR-код")
-async def upload_qr(
+async def save_profile_image(
     request: Request,
-    file: UploadFile = File(...),
-    user: asyncpg.Record = Depends(current_user),
+    file: UploadFile,
+    user: asyncpg.Record,
+    column: str,
 ) -> ProfileOut:
     if not file.content_type or file.content_type not in {
         "image/jpeg",
@@ -584,15 +601,17 @@ async def upload_qr(
     if len(payload) > 2 * 1024 * 1024:
         raise HTTPException(status_code=400, detail=msg(request, "qr_size"))
 
-    suffix = Path(file.filename or "qr.png").suffix.lower() or ".png"
-    name = f"{user['id']}_{uuid4().hex}{suffix}"
+    if column not in {"sber_qr_url", "avatar_url"}:
+        raise HTTPException(status_code=500, detail=msg(request, "server_error"))
+    suffix = Path(file.filename or "image.png").suffix.lower() or ".png"
+    name = f"{user['id']}_{column}_{uuid4().hex}{suffix}"
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOAD_DIR / name).write_bytes(payload)
     public_url = f"/uploads/{name}"
     row = await pool.fetchrow(
-        """
+        f"""
         UPDATE profiles
-        SET sber_qr_url = $2, updated_at = NOW()
+        SET {column} = $2, updated_at = NOW()
         WHERE id = $1
         RETURNING *
         """,
@@ -602,6 +621,24 @@ async def upload_qr(
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
     return row_to_profile(row)
+
+
+@app.post("/api/profiles/me/qr", summary="Загрузить QR-код")
+async def upload_qr(
+    request: Request,
+    file: UploadFile = File(...),
+    user: asyncpg.Record = Depends(current_user),
+) -> ProfileOut:
+    return await save_profile_image(request, file, user, "sber_qr_url")
+
+
+@app.post("/api/profiles/me/avatar", summary="Загрузить фото кружка")
+async def upload_avatar(
+    request: Request,
+    file: UploadFile = File(...),
+    user: asyncpg.Record = Depends(current_user),
+) -> ProfileOut:
+    return await save_profile_image(request, file, user, "avatar_url")
 
 
 @app.get("/api/profiles/{username}", summary="Публичный профиль стримера")

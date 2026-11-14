@@ -369,7 +369,6 @@
                 </div>
             </div>
             
-            <a href="index.html" class="back-link" data-i18n="nav.home">← На главную</a>
         </div>
         
         <div class="right-section">
@@ -453,6 +452,17 @@
                 } else {
                     qrCodeContainerEl.innerHTML = '<p>' + t('donate.qrMissing') + '</p>';
                 }
+                const letter = (profile.display_name || profile.username || '?').charAt(0).toUpperCase();
+                const color = profile.avatar_color || '#ff4081';
+                if (profile.avatar_url) {
+                    streamerAvatarEl.innerHTML = `<img src="${profile.avatar_url}" alt="${profile.username}">`;
+                } else {
+                    streamerAvatarEl.innerHTML = `
+                        <div style="width:100%;height:100%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:2.5rem;">
+                            ${letter}
+                        </div>
+                    `;
+                }
             }
 
             if (!username && !userId) {
@@ -515,21 +525,6 @@
                     if (profile) {
                         loadedProfile = profile;
                         applyStreamer(profile);
-                        
-                        // Устанавливаем аватар
-                        if (profile.avatar_url) {
-                            streamerAvatarEl.innerHTML = `<img src="${profile.avatar_url}" alt="${profile.username}">`;
-                        } else {
-                            // Генерируем аватар с инициалами
-                            const initials = profile.username.charAt(0).toUpperCase();
-                            const colors = ['#7c4dff', '#651fff', '#ff4081', '#00bcd4', '#4caf50'];
-                            const color = colors[profile.username.length % colors.length];
-                            streamerAvatarEl.innerHTML = `
-                                <div style="width:100%;height:100%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:2.5rem;">
-                                    ${initials}
-                                </div>
-                            `;
-                        }
                         
                         // Сохраняем ID профиля для формы
                         donationFormEl.dataset.profileId = profile.id;
