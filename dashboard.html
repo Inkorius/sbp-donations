@@ -43,6 +43,27 @@
         .look-grid input[type="text"], .look-grid textarea { width: 100%; padding: 8px; box-sizing: border-box; }
         .avatar-preview { width: 96px; height: 96px; border-radius: 50%; overflow: hidden; border: 2px solid #ddd; }
         .avatar-preview img, .avatar-preview div { width: 100%; height: 100%; object-fit: cover; }
+        .crop-box { display: none; margin-top: 12px; }
+        .crop-box.open { display: block; }
+        .crop-viewport {
+            width: 280px;
+            height: 280px;
+            border-radius: 50%;
+            overflow: hidden;
+            position: relative;
+            cursor: grab;
+            touch-action: none;
+            background: #222;
+            border: 3px solid #7c4dff;
+        }
+        .crop-viewport.dragging { cursor: grabbing; }
+        .crop-viewport img {
+            position: absolute;
+            max-width: none;
+            user-select: none;
+            pointer-events: none;
+        }
+        #avatar-zoom { width: 280px; }
         .notice-overlay {
             display: none;
             position: fixed;
@@ -95,6 +116,14 @@
             <input type="color" id="avatar-color" value="#ff4081">
             <label for="avatar-upload" data-i18n="dash.avatarPhoto">Фото вместо буквы</label>
             <input type="file" id="avatar-upload" accept="image/jpeg,image/png,image/jpg,image/webp">
+        </div>
+        <div id="avatar-cropper" class="crop-box">
+            <p data-i18n="dash.avatar.cropHint">Перетащите фото и выберите масштаб. В кружке будет то, что видно сейчас.</p>
+            <div class="crop-viewport" id="crop-viewport">
+                <img id="crop-image" alt="">
+            </div>
+            <label for="avatar-zoom" data-i18n="dash.avatar.zoom">Масштаб</label>
+            <input type="range" id="avatar-zoom" min="100" max="300" value="100">
         </div>
         <button id="save-look-btn" data-i18n="dash.look.save">Сохранить имя, описание и цвет</button>
         <button id="upload-avatar-btn" data-i18n="dash.avatar.upload">Загрузить фото</button>
@@ -193,6 +222,21 @@
             const noticeText = document.getElementById('notice-text')
             const noticeOk = document.getElementById('notice-ok')
             let pendingAvatarFile = null
+            const avatarCropper = document.getElementById('avatar-cropper')
+            const cropViewport = document.getElementById('crop-viewport')
+            const cropImage = document.getElementById('crop-image')
+            const avatarZoomEl = document.getElementById('avatar-zoom')
+            const CROP_VIEW = 280
+            const CROP_OUT = 512
+            const crop = {
+                img: null,
+                zoom: 1,
+                x: 0,
+                y: 0,
+                dragging: false,
+                lastX: 0,
+                lastY: 0,
+            }
             
             // Текущий пользователь и профиль
             let currentUser = null
@@ -226,6 +270,39 @@
             clearAvatarBtn.addEventListener('click', clearAvatar)
             noticeOk.addEventListener('click', () => noticeOverlay.classList.remove('open'))
             avatarUploadEl.addEventListener('change', previewAvatarFile)
+            avatarZoomEl.addEventListener('input', () => {
+                crop.zoom = Number(avatarZoomEl.value) / 100
+                clampCrop()
+                renderCrop()
+            })
+            cropViewport.addEventListener('pointerdown', (event) => {
+                if (!crop.img) return
+                crop.dragging = true
+                crop.lastX = event.clientX
+                crop.lastY = event.clientY
+                cropViewport.classList.add('dragging')
+                cropViewport.setPointerCapture(event.pointerId)
+            })
+            cropViewport.addEventListener('pointermove', (event) => {
+                if (!crop.dragging) return
+                crop.x += event.clientX - crop.lastX
+                crop.y += event.clientY - crop.lastY
+                crop.lastX = event.clientX
+                crop.lastY = event.clientY
+                clampCrop()
+                renderCrop()
+            })
+            cropViewport.addEventListener('pointerup', () => stopCropDrag())
+            cropViewport.addEventListener('pointercancel', () => stopCropDrag())
+            cropViewport.addEventListener('wheel', (event) => {
+                if (!crop.img) return
+                event.preventDefault()
+                const next = crop.zoom + (event.deltaY < 0 ? 0.08 : -0.08)
+                crop.zoom = Math.min(3, Math.max(1, next))
+                avatarZoomEl.value = String(Math.round(crop.zoom * 100))
+                clampCrop()
+                renderCrop()
+            }, { passive: false })
             avatarColorEl.addEventListener('input', () => {
                 if (currentProfile) paintAvatar(Object.assign({}, currentProfile, { avatar_color: avatarColorEl.value, avatar_url: currentProfile.avatar_url }))
             })
@@ -295,7 +372,7 @@
                 displayNameEl.value = profile.display_name || profile.username || ''
                 profileDescriptionEl.value = profile.description || ''
                 avatarColorEl.value = profile.avatar_color || '#ff4081'
-                paintAvatar(profile)
+                if (!crop.img) paintAvatar(profile)
             }
 
             async function saveLook() {
@@ -332,10 +409,7 @@
                 return new Promise((resolve, reject) => {
                     const url = URL.createObjectURL(file)
                     const img = new Image()
-                    img.onload = () => {
-                        URL.revokeObjectURL(url)
-                        resolve(img)
-                    }
+                    img.onload = () => resolve(img)
                     img.onerror = () => {
                         URL.revokeObjectURL(url)
                         reject(new Error(window.sbpI18n.t('dash.avatar.badImage')))
@@ -344,16 +418,38 @@
                 })
             }
 
-            function cropCenterSquare(img, size) {
-                const canvas = document.createElement('canvas')
-                canvas.width = size
-                canvas.height = size
-                const ctx = canvas.getContext('2d')
-                const side = Math.min(img.naturalWidth, img.naturalHeight)
-                const sx = (img.naturalWidth - side) / 2
-                const sy = (img.naturalHeight - side) / 2
-                ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size)
-                return canvas
+            function stopCropDrag() {
+                crop.dragging = false
+                cropViewport.classList.remove('dragging')
+            }
+
+            function coverScale() {
+                if (!crop.img) return 1
+                return Math.max(CROP_VIEW / crop.img.naturalWidth, CROP_VIEW / crop.img.naturalHeight)
+            }
+
+            function totalScale() {
+                return coverScale() * crop.zoom
+            }
+
+            function clampCrop() {
+                if (!crop.img) return
+                const tw = crop.img.naturalWidth * totalScale()
+                const th = crop.img.naturalHeight * totalScale()
+                const maxX = Math.max(0, (tw - CROP_VIEW) / 2)
+                const maxY = Math.max(0, (th - CROP_VIEW) / 2)
+                crop.x = Math.min(maxX, Math.max(-maxX, crop.x))
+                crop.y = Math.min(maxY, Math.max(-maxY, crop.y))
+            }
+
+            function renderCrop() {
+                if (!crop.img) return
+                const tw = crop.img.naturalWidth * totalScale()
+                const th = crop.img.naturalHeight * totalScale()
+                cropImage.style.width = tw + 'px'
+                cropImage.style.height = th + 'px'
+                cropImage.style.left = ((CROP_VIEW - tw) / 2 + crop.x) + 'px'
+                cropImage.style.top = ((CROP_VIEW - th) / 2 + crop.y) + 'px'
             }
 
             function canvasToJpegFile(canvas, maxBytes) {
@@ -375,11 +471,32 @@
                 })
             }
 
-            async function prepareCircleAvatar(file) {
-                const img = await loadImageFromFile(file)
-                const size = Math.min(512, Math.max(img.naturalWidth, img.naturalHeight, 256))
-                const canvas = cropCenterSquare(img, Math.min(512, size))
+            async function exportCroppedAvatar() {
+                if (!crop.img) throw new Error(window.sbpI18n.t('dash.file.missing'))
+                const canvas = document.createElement('canvas')
+                canvas.width = CROP_OUT
+                canvas.height = CROP_OUT
+                const ctx = canvas.getContext('2d')
+                const k = CROP_OUT / CROP_VIEW
+                const tw = crop.img.naturalWidth * totalScale() * k
+                const th = crop.img.naturalHeight * totalScale() * k
+                const dx = (CROP_OUT - tw) / 2 + crop.x * k
+                const dy = (CROP_OUT - th) / 2 + crop.y * k
+                ctx.drawImage(crop.img, dx, dy, tw, th)
                 return canvasToJpegFile(canvas, 2 * 1024 * 1024)
+            }
+
+            function resetCropper() {
+                if (cropImage.src && cropImage.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(cropImage.src)
+                }
+                crop.img = null
+                crop.zoom = 1
+                crop.x = 0
+                crop.y = 0
+                cropImage.removeAttribute('src')
+                avatarCropper.classList.remove('open')
+                pendingAvatarFile = null
             }
 
             async function previewAvatarFile() {
@@ -389,27 +506,36 @@
                 try {
                     lookStatusEl.style.color = '#ff9800'
                     lookStatusEl.textContent = window.sbpI18n.t('dash.avatar.preparing')
-                    pendingAvatarFile = await prepareCircleAvatar(file)
-                    const previewUrl = URL.createObjectURL(pendingAvatarFile)
-                    avatarPreviewEl.innerHTML = `<img src="${previewUrl}" alt="">`
-                    lookStatusEl.style.color = '#4CAF50'
+                    const img = await loadImageFromFile(file)
+                    crop.img = img
+                    crop.zoom = 1
+                    crop.x = 0
+                    crop.y = 0
+                    avatarZoomEl.value = '100'
+                    cropImage.src = img.src
+                    avatarCropper.classList.add('open')
+                    clampCrop()
+                    renderCrop()
                     lookStatusEl.textContent = ''
                 } catch (error) {
-                    pendingAvatarFile = null
+                    resetCropper()
                     lookStatusEl.style.color = '#f44336'
                     lookStatusEl.textContent = error.message
                 }
             }
 
             async function uploadAvatar() {
-                if (!pendingAvatarFile && !avatarUploadEl.files[0]) {
+                if (!crop.img && !avatarUploadEl.files[0]) {
                     showNotice(window.sbpI18n.t('dash.file.missing'))
                     return
                 }
                 lookStatusEl.style.color = '#ff9800'
                 lookStatusEl.textContent = window.sbpI18n.t('dash.avatar.preparing')
                 try {
-                    const file = pendingAvatarFile || await prepareCircleAvatar(avatarUploadEl.files[0])
+                    if (!crop.img && avatarUploadEl.files[0]) {
+                        await previewAvatarFile()
+                    }
+                    const file = await exportCroppedAvatar()
                     const formData = new FormData()
                     formData.append('file', file, 'avatar.jpg')
                     const profile = await window.sbpApi.request('/api/profiles/me/avatar', {
@@ -417,7 +543,7 @@
                         body: formData,
                     })
                     currentProfile = profile
-                    pendingAvatarFile = null
+                    resetCropper()
                     avatarUploadEl.value = ''
                     fillLookForm(profile)
                     lookStatusEl.style.color = '#4CAF50'
@@ -435,6 +561,8 @@
                         body: JSON.stringify({ clear_avatar: true }),
                     })
                     currentProfile = profile
+                    resetCropper()
+                    avatarUploadEl.value = ''
                     fillLookForm(profile)
                     lookStatusEl.style.color = '#4CAF50'
                     lookStatusEl.textContent = window.sbpI18n.t('dash.look.saved')
