@@ -232,6 +232,9 @@
         let lastCheckTime = new Date().toISOString();
         let pollingInterval = null;
         let overlaySocket = null;
+        let alertSoundUrl = null;
+        const pendingDonations = [];
+        let overlayBusy = false;
 
         function apiUrl(path) {
             return path;
@@ -268,6 +271,7 @@
                 });
 
                 currentProfileId = profile.id;
+                alertSoundUrl = profile.alert_sound_url || null;
                 document.getElementById('streamer-id').textContent = profile.id.substring(0, 8) + '...';
                 updateStatus('Стример: ' + (profile.display_name || profile.username), 'success');
                 document.body.classList.add('theme-' + currentTheme);
@@ -338,18 +342,54 @@
         }
 
         // ========== ДОБАВЛЕНИЕ ДОНАТА НА ЭКРАН ==========
-        function addDonation(donation, skipAnimation = false) {
+        function sleep(ms) {
+            return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        function playAudio(src) {
+            return new Promise((resolve) => {
+                if (!src) {
+                    resolve();
+                    return;
+                }
+                const audio = new Audio(src);
+                audio.volume = 1;
+                const done = () => resolve();
+                audio.addEventListener('ended', done, { once: true });
+                audio.addEventListener('error', done, { once: true });
+                audio.play().catch(() => resolve());
+            });
+        }
+
+        function addDonation(donation) {
             if (donation.id && seenDonationIds.has(donation.id)) return;
             if (donation.id) seenDonationIds.add(donation.id);
+            pendingDonations.push(donation);
+            processOverlayQueue();
+        }
+
+        async function processOverlayQueue() {
+            if (overlayBusy) return;
+            overlayBusy = true;
+            while (pendingDonations.length) {
+                const donation = pendingDonations.shift();
+                await sleep(5000);
+                if (alertSoundUrl) {
+                    await playAudio(alertSoundUrl);
+                }
+                await presentDonation(donation);
+            }
+            overlayBusy = false;
+        }
+
+        async function presentDonation(donation) {
             donationsCount++;
             document.getElementById('counter').textContent = donationsCount;
 
-            // Создаем элемент доната
             const donationEl = document.createElement('div');
             donationEl.className = 'donation-item';
             donationEl.style.fontSize = config.size + 'px';
             donationEl.style.color = config.color;
-
             donationEl.innerHTML = `
                 <div class="donation-header">
                     <div class="donor-name">${escapeHtml(donation.donor_name)}</div>
@@ -358,55 +398,27 @@
                 ${donation.message ? `<div class="donation-message">${escapeHtml(donation.message)}</div>` : ''}
             `;
 
-            // Добавляем в контейнер
             const container = document.getElementById('donations-container');
             container.appendChild(donationEl);
-
-            // Добавляем в очередь для управления
             donationsQueue.push(donationEl);
-
-            // Ограничиваем количество одновременно показанных донатов
             if (donationsQueue.length > config.maxDonations) {
                 const oldDonation = donationsQueue.shift();
                 if (oldDonation.parentNode) {
-                    oldDonation.style.animation = 'none';
-                    oldDonation.style.opacity = '0';
-                    setTimeout(() => {
-                        if (oldDonation.parentNode) {
-                            oldDonation.parentNode.removeChild(oldDonation);
-                        }
-                    }, 300);
+                    oldDonation.parentNode.removeChild(oldDonation);
                 }
             }
 
-            // Запускаем анимацию (если не пропущена)
-            if (!skipAnimation) {
-                donationEl.style.animation = `${config.animation} ${config.duration}ms forwards`;
-                if (config.sound) {
-                    playNotificationSound(donation.amount);
-                }
-                speakDonation(donation);
-            } else {
-                donationEl.style.opacity = '1';
-                donationEl.style.transform = 'translateX(0)';
-            }
+            donationEl.style.animation = `${config.animation} ${config.duration}ms forwards`;
+            await Promise.all([speakDonation(donation), sleep(config.duration)]);
 
-            // Автоматическое удаление после показа
-            setTimeout(() => {
-                const index = donationsQueue.indexOf(donationEl);
-                if (index > -1) {
-                    donationsQueue.splice(index, 1);
-                }
-                if (donationEl.parentNode) {
-                    donationEl.style.opacity = '0';
-                    donationEl.style.transition = 'opacity 0.5s';
-                    setTimeout(() => {
-                        if (donationEl.parentNode) {
-                            donationEl.parentNode.removeChild(donationEl);
-                        }
-                    }, 500);
-                }
-            }, skipAnimation ? config.duration : config.duration);
+            const index = donationsQueue.indexOf(donationEl);
+            if (index > -1) donationsQueue.splice(index, 1);
+            if (donationEl.parentNode) {
+                donationEl.style.opacity = '0';
+                donationEl.style.transition = 'opacity 0.5s';
+                await sleep(500);
+                if (donationEl.parentNode) donationEl.parentNode.removeChild(donationEl);
+            }
         }
 
         // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
@@ -421,42 +433,12 @@
             return parseFloat(amount).toFixed(0);
         }
 
-        const ttsQueue = [];
-        let ttsBusy = false;
-
-        if (window.speechSynthesis) {
-            window.speechSynthesis.getVoices();
-            window.speechSynthesis.addEventListener('voiceschanged', () => {
-                window.speechSynthesis.getVoices();
-            });
-        }
-
-        function speakDonation(donation) {
-            if (!config.tts || !window.speechSynthesis) return;
+        async function speakDonation(donation) {
+            if (!config.tts) return;
             const amount = formatAmount(donation.amount);
             const message = donation.message ? '. ' + donation.message : '';
-            ttsQueue.push((donation.donor_name || 'Кто-то') + ' задонатил ' + amount + ' рублей' + message);
-            playNextTts();
-        }
-
-        function playNextTts() {
-            if (ttsBusy || !ttsQueue.length) return;
-            ttsBusy = true;
-            window.speechSynthesis.resume();
-            const utterance = new SpeechSynthesisUtterance(ttsQueue.shift());
-            utterance.lang = 'ru-RU';
-            const voice = window.speechSynthesis.getVoices().find((item) => item.lang && item.lang.toLowerCase().startsWith('ru'));
-            if (voice) utterance.voice = voice;
-            utterance.rate = 1;
-            utterance.onend = () => {
-                ttsBusy = false;
-                playNextTts();
-            };
-            utterance.onerror = () => {
-                ttsBusy = false;
-                playNextTts();
-            };
-            window.speechSynthesis.speak(utterance);
+            const text = ((donation.donor_name || 'Кто-то') + ' задонатил ' + amount + ' рублей' + message).slice(0, 500);
+            await playAudio(apiUrl('/api/tts?text=' + encodeURIComponent(text)));
         }
 
         function updateStatus(message, type = 'info') {
@@ -492,20 +474,6 @@
             errorEl.style.opacity = '1';
             errorEl.style.animation = 'none';
             document.getElementById('donations-container').appendChild(errorEl);
-        }
-
-        function playNotificationSound(amount) {
-            try {
-                const soundUrl = amount >= 1000 ? 
-                    'https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3' :
-                    'https://assets.mixkit.co/sfx/preview/mixkit-correct-answer-tone-2870.mp3';
-                
-                const audio = new Audio(soundUrl);
-                audio.volume = 0.2;
-                audio.play().catch(e => console.log('🔇 Звук заблокирован браузером'));
-            } catch (e) {
-                console.log('🔇 Звук не поддерживается');
-            }
         }
 
         // ========== ФУНКЦИИ ОТЛАДКИ ==========

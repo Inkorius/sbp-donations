@@ -213,6 +213,13 @@
                 <option value="96">96</option>
             </select>
         </div>
+        <p data-i18n="dash.obs.sound.hint">Звук уведомления играет перед озвучкой. Если файл не загружен — после паузы 5 секунд сразу текст и голос.</p>
+        <div class="obs-row">
+            <input type="file" id="obs-sound-upload" accept="audio/mpeg,audio/wav,audio/ogg,.mp3,.wav,.ogg">
+            <button type="button" id="obs-sound-upload-btn" data-i18n="dash.obs.sound.upload">Загрузить звук уведомления</button>
+            <button type="button" id="obs-sound-clear-btn" data-i18n="dash.obs.sound.clear">Убрать звук</button>
+        </div>
+        <div id="obs-sound-status"></div>
         <div class="donate-link" id="obs-link"></div>
         <button id="copy-obs-btn" class="copy-btn" data-i18n="dash.obs.copy">Скопировать ссылку для OBS</button>
     </div>
@@ -265,6 +272,10 @@
             const obsDebugBtn = document.getElementById('obs-debug-btn')
             const obsFontEl = document.getElementById('obs-font')
             const obsSizeEl = document.getElementById('obs-size')
+            const obsSoundUploadEl = document.getElementById('obs-sound-upload')
+            const obsSoundUploadBtn = document.getElementById('obs-sound-upload-btn')
+            const obsSoundClearBtn = document.getElementById('obs-sound-clear-btn')
+            const obsSoundStatusEl = document.getElementById('obs-sound-status')
             const obsSettings = {
                 tts: localStorage.getItem('sbp_obs_tts') === '1',
                 debug: localStorage.getItem('sbp_obs_debug') === '1',
@@ -341,6 +352,8 @@
             obsFontEl.value = obsSettings.font
             obsSizeEl.value = obsSettings.size
             refreshObsLink()
+            obsSoundUploadBtn.addEventListener('click', uploadAlertSound)
+            obsSoundClearBtn.addEventListener('click', clearAlertSound)
             confirmAllBtn.addEventListener('click', confirmAllPending)
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
@@ -415,6 +428,7 @@
                     } else {
                         qrPreviewEl.innerHTML = `<p>${t('dash.qr.missing')}</p>`
                     }
+                    paintAlertSound(profile)
                     
                     // Показываем ссылку для донатов, если есть username
                     if (profile.username) {
@@ -828,6 +842,61 @@
             }
             
             // Копирование ссылки
+            function paintAlertSound(profile) {
+                const t = window.sbpI18n.t
+                if (profile && profile.alert_sound_url) {
+                    obsSoundStatusEl.textContent = t('dash.obs.sound.yes')
+                    obsSoundStatusEl.style.color = '#4CAF50'
+                } else {
+                    obsSoundStatusEl.textContent = t('dash.obs.sound.no')
+                    obsSoundStatusEl.style.color = '#666'
+                }
+            }
+
+            async function uploadAlertSound() {
+                const file = obsSoundUploadEl.files && obsSoundUploadEl.files[0]
+                if (!file) {
+                    showNotice(window.sbpI18n.t('dash.file.missing'))
+                    return
+                }
+                const allowed = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg', 'audio/webm', 'audio/mp4']
+                const name = (file.name || '').toLowerCase()
+                if (!allowed.includes(file.type) && !/\.(mp3|wav|ogg|m4a)$/.test(name)) {
+                    alert(window.sbpI18n.t('dash.obs.sound.type'))
+                    return
+                }
+                if (file.size > 3 * 1024 * 1024) {
+                    alert(window.sbpI18n.t('dash.obs.sound.size'))
+                    return
+                }
+                const formData = new FormData()
+                formData.append('file', file)
+                try {
+                    const updated = await window.sbpApi.request('/api/profiles/me/alert-sound', {
+                        method: 'POST',
+                        body: formData,
+                    })
+                    currentProfile = updated
+                    paintAlertSound(updated)
+                    obsSoundUploadEl.value = ''
+                } catch (error) {
+                    alert(error.message)
+                }
+            }
+
+            async function clearAlertSound() {
+                try {
+                    const updated = await window.sbpApi.request('/api/profiles/me', {
+                        method: 'PATCH',
+                        body: JSON.stringify({ clear_alert_sound: true }),
+                    })
+                    currentProfile = updated
+                    paintAlertSound(updated)
+                } catch (error) {
+                    alert(error.message)
+                }
+            }
+
             function paintObsToggles() {
                 const t = window.sbpI18n.t
                 obsTtsBtn.textContent = t('dash.obs.tts') + ': ' + t(obsSettings.tts ? 'dash.obs.on' : 'dash.obs.off')

@@ -80,6 +80,9 @@ TEXTS = {
         "qr_missing": "Выберите файл с QR-кодом",
         "qr_type": "Нужно изображение JPG, PNG или WebP",
         "qr_size": "Файл слишком большой. Максимум 2 МБ",
+        "sound_type": "Нужен звук MP3, WAV или OGG",
+        "sound_size": "Звук слишком большой. Максимум 3 МБ",
+        "tts_fail": "Не удалось создать озвучку",
         "bad_color": "Цвет кружка должен быть в формате #RRGGBB",
         "confirm_own": "Можно менять только свои донаты",
     },
@@ -94,6 +97,9 @@ TEXTS = {
         "qr_missing": "Choose a QR code image",
         "qr_type": "Use a JPG, PNG, or WebP image",
         "qr_size": "File is too large. Maximum size is 2 MB",
+        "sound_type": "Use an MP3, WAV, or OGG sound",
+        "sound_size": "Sound file is too large. Maximum size is 3 MB",
+        "tts_fail": "Could not generate voice audio",
         "bad_color": "Circle color must be in #RRGGBB format",
         "confirm_own": "You can only change your own donations",
     },
@@ -211,6 +217,7 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS sber_qr_url TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_url TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS avatar_color TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS alert_sound_url TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
     """
     DO $$
@@ -299,6 +306,7 @@ async def lifespan(_app: FastAPI):
     if not JWT_SECRET:
         raise RuntimeError("JWT_SECRET is required")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / "tts").mkdir(parents=True, exist_ok=True)
     dsn, ssl = parse_database_url()
     pool_kwargs: dict = {"dsn": dsn, "min_size": 1, "max_size": 10}
     if ssl is not None:
@@ -380,6 +388,7 @@ class ProfileOut(BaseModel):
     sber_qr_url: Optional[str]
     avatar_url: Optional[str]
     avatar_color: Optional[str]
+    alert_sound_url: Optional[str] = None
     created_at: datetime
 
 
@@ -388,6 +397,7 @@ class ProfileUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=500)
     avatar_color: Optional[str] = Field(default=None, max_length=7)
     clear_avatar: Optional[bool] = None
+    clear_alert_sound: Optional[bool] = None
 
 
 class DonationCreate(BaseModel):
@@ -421,6 +431,7 @@ def row_to_profile(row: asyncpg.Record) -> ProfileOut:
         sber_qr_url=row["sber_qr_url"],
         avatar_url=row["avatar_url"],
         avatar_color=row["avatar_color"] if "avatar_color" in keys else None,
+        alert_sound_url=row["alert_sound_url"] if "alert_sound_url" in keys else None,
         created_at=row["created_at"],
     )
 
@@ -596,6 +607,7 @@ async def update_my_profile(
             description = COALESCE($3, description),
             avatar_color = COALESCE($4, avatar_color),
             avatar_url = CASE WHEN $5 THEN NULL ELSE avatar_url END,
+            alert_sound_url = CASE WHEN $6 THEN NULL ELSE alert_sound_url END,
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -605,6 +617,7 @@ async def update_my_profile(
         body.description,
         color,
         bool(body.clear_avatar),
+        bool(body.clear_alert_sound),
     )
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
@@ -668,6 +681,75 @@ async def upload_avatar(
     user: asyncpg.Record = Depends(current_user),
 ) -> ProfileOut:
     return await save_profile_image(request, file, user, "avatar_url")
+
+
+@app.post("/api/profiles/me/alert-sound", summary="Загрузить звук уведомления")
+async def upload_alert_sound(
+    request: Request,
+    file: UploadFile = File(...),
+    user: asyncpg.Record = Depends(current_user),
+) -> ProfileOut:
+    suffix = Path(file.filename or "alert.mp3").suffix.lower()
+    allowed_types = {
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/wave",
+        "audio/ogg",
+        "audio/webm",
+        "audio/mp4",
+    }
+    allowed_suffix = {".mp3", ".wav", ".ogg", ".m4a", ".webm"}
+    if suffix not in allowed_suffix and (file.content_type or "") not in allowed_types:
+        raise HTTPException(status_code=400, detail=msg(request, "sound_type"))
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail=msg(request, "qr_missing"))
+    if len(payload) > 3 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail=msg(request, "sound_size"))
+    if suffix not in allowed_suffix:
+        suffix = ".mp3"
+    name = f"{user['id']}_alert_{uuid4().hex}{suffix}"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    (UPLOAD_DIR / name).write_bytes(payload)
+    public_url = f"/uploads/{name}"
+    row = await pool.fetchrow(
+        """
+        UPDATE profiles
+        SET alert_sound_url = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+        """,
+        user["id"],
+        public_url,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
+    return row_to_profile(row)
+
+
+@app.get("/api/tts", summary="Озвучка доната")
+async def overlay_tts(request: Request, text: str = Query(..., min_length=1, max_length=500)):
+    clean = re.sub(r"\s+", " ", text).strip()
+    if not clean:
+        raise HTTPException(status_code=400, detail=msg(request, "tts_fail"))
+    tts_dir = UPLOAD_DIR / "tts"
+    tts_dir.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
+    path = tts_dir / f"{digest}.mp3"
+    if not path.is_file():
+        try:
+            import edge_tts
+
+            tmp = path.with_suffix(".tmp.mp3")
+            communicate = edge_tts.Communicate(clean, "ru-RU-DmitryNeural")
+            await communicate.save(str(tmp))
+            tmp.replace(path)
+        except Exception as exc:
+            logging.exception("TTS failed")
+            raise HTTPException(status_code=502, detail=msg(request, "tts_fail")) from exc
+    return FileResponse(path, media_type="audio/mpeg", filename="tts.mp3")
 
 
 @app.get("/api/profiles/{username}", summary="Публичный профиль стримера")
@@ -802,6 +884,10 @@ async def uploaded_file(name: str):
     path = (UPLOAD_DIR / Path(name).name).resolve()
     if not str(path).startswith(str(UPLOAD_DIR.resolve())) or not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
+    types = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4", ".webm": "audio/webm"}
+    media = types.get(path.suffix.lower())
+    if media:
+        return FileResponse(path, media_type=media)
     return FileResponse(path)
 
 
