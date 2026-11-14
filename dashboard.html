@@ -176,6 +176,13 @@
         </div>
     </div>
 
+    <div class="section" id="obs-section">
+        <h2 data-i18n="dash.obs">OBS-оверлей</h2>
+        <p data-i18n="dash.obs.hint">В OBS: Источники → Браузер. Вставьте эту ссылку. Ширина 1920, высота 1080. Фон страницы прозрачный.</p>
+        <div class="donate-link" id="obs-link"></div>
+        <button id="copy-obs-btn" class="copy-btn" data-i18n="dash.obs.copy">Скопировать ссылку для OBS</button>
+    </div>
+
     <div class="section">
         <h2 data-i18n="dash.donations">Последние донаты</h2>
         <div id="donations-list">
@@ -218,6 +225,8 @@
             const uploadAvatarBtn = document.getElementById('upload-avatar-btn')
             const clearAvatarBtn = document.getElementById('clear-avatar-btn')
             const lookStatusEl = document.getElementById('look-status')
+            const obsLinkEl = document.getElementById('obs-link')
+            const copyObsBtn = document.getElementById('copy-obs-btn')
             const noticeOverlay = document.getElementById('notice-overlay')
             const noticeText = document.getElementById('notice-text')
             const noticeOk = document.getElementById('notice-ok')
@@ -264,6 +273,7 @@
             loadDonationsBtn.addEventListener('click', loadDonations)
             uploadBtn.addEventListener('click', uploadQR)
             copyLinkBtn.addEventListener('click', copyDonateLink)
+            copyObsBtn.addEventListener('click', copyObsLink)
             confirmAllBtn.addEventListener('click', confirmAllPending)
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
@@ -345,6 +355,7 @@
                         donateLinkEl.textContent = donateLink
                         donateLinkContainer.style.display = 'block'
                         noUsernameEl.style.display = 'none'
+                        obsLinkEl.textContent = `${window.location.origin}${window.sbpApi.page('obs-overlay.html')}?user=${profile.username}`
                     } else {
                         donateLinkContainer.style.display = 'none'
                         noUsernameEl.style.display = 'block'
@@ -750,6 +761,19 @@
             }
             
             // Копирование ссылки
+            async function copyObsLink() {
+                const link = obsLinkEl.textContent
+                try {
+                    await navigator.clipboard.writeText(link)
+                    copyObsBtn.textContent = window.sbpI18n.t('dash.copied')
+                    setTimeout(() => {
+                        copyObsBtn.textContent = window.sbpI18n.t('dash.obs.copy')
+                    }, 2000)
+                } catch (err) {
+                    alert(window.sbpI18n.t('dash.copyFail'))
+                }
+            }
+
             async function copyDonateLink() {
                 const link = donateLinkEl.textContent
                 try {

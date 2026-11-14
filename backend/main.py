@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -15,7 +16,7 @@ from uuid import UUID, uuid4
 import asyncpg
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +31,34 @@ logging.basicConfig(level=logging.INFO)
 
 pool: Optional[asyncpg.Pool] = None
 security = HTTPBearer()
+
+
+class DonationHub:
+    def __init__(self):
+        self.clients: dict[str, set[WebSocket]] = {}
+
+    async def connect(self, profile_id: str, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self.clients.setdefault(profile_id, set()).add(websocket)
+
+    def disconnect(self, profile_id: str, websocket: WebSocket) -> None:
+        group = self.clients.get(profile_id)
+        if not group:
+            return
+        group.discard(websocket)
+        if not group:
+            self.clients.pop(profile_id, None)
+
+    async def broadcast(self, profile_id: str, payload: dict) -> None:
+        group = list(self.clients.get(profile_id, ()))
+        for websocket in group:
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                self.disconnect(profile_id, websocket)
+
+
+hub = DonationHub()
 
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALG = "HS256"
@@ -672,25 +701,61 @@ async def create_donation(request: Request, body: DonationCreate) -> DonationOut
         body.amount,
         (body.message or "").strip() or None,
     )
-    return row_to_donation(row)
+    donation = row_to_donation(row)
+    await hub.broadcast(
+        str(body.profile_id),
+        {"type": "donation.new", "data": donation.model_dump(mode="json")},
+    )
+    return donation
+
+
+@app.websocket("/ws/donations")
+async def donations_socket(websocket: WebSocket, profile_id: UUID):
+    key = str(profile_id)
+    await hub.connect(key, websocket)
+    try:
+        while True:
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=25)
+            except TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        hub.disconnect(key, websocket)
+    except Exception:
+        hub.disconnect(key, websocket)
 
 
 @app.get("/api/donations", summary="Список донатов")
 async def list_donations(
     profile_id: UUID = Query(...),
     limit: int = Query(20, ge=1, le=100),
+    since: Optional[datetime] = Query(default=None),
 ) -> list[DonationOut]:
-    rows = await pool.fetch(
-        """
-        SELECT id, profile_id, donor_name, amount, message, status, created_at
-        FROM donations
-        WHERE profile_id = $1
-        ORDER BY created_at DESC
-        LIMIT $2
-        """,
-        profile_id,
-        limit,
-    )
+    if since:
+        rows = await pool.fetch(
+            """
+            SELECT id, profile_id, donor_name, amount, message, status, created_at
+            FROM donations
+            WHERE profile_id = $1 AND created_at > $2
+            ORDER BY created_at ASC
+            LIMIT $3
+            """,
+            profile_id,
+            since,
+            limit,
+        )
+    else:
+        rows = await pool.fetch(
+            """
+            SELECT id, profile_id, donor_name, amount, message, status, created_at
+            FROM donations
+            WHERE profile_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            profile_id,
+            limit,
+        )
     return [row_to_donation(row) for row in rows]
 
 

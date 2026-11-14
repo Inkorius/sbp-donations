@@ -215,14 +215,10 @@
         </div>
     </div>
 
-    <!-- Подключаем Supabase -->
-    <script src="js/supabase-cdn.js"></script>
-
     <script>
-        // ========== КОНФИГУРАЦИЯ ==========
         const urlParams = new URLSearchParams(window.location.search);
         const config = {
-            username: urlParams.get('user') || 'parfjek',
+            username: urlParams.get('user') || '',
             duration: parseInt(urlParams.get('duration')) || 10000,
             position: urlParams.get('position') || 'top-right',
             maxDonations: parseInt(urlParams.get('max')) || 5,
@@ -230,203 +226,116 @@
             sound: urlParams.has('sound'),
             theme: urlParams.get('theme') || 'default',
             debug: urlParams.has('debug'),
-            useRealtime: !urlParams.has('no-realtime') // можно отключить через ?no-realtime=true
+            useRealtime: !urlParams.has('no-realtime')
         };
 
-        // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
         let currentProfileId = null;
         let donationsCount = 0;
         const donationsQueue = [];
+        const seenDonationIds = new Set();
         let currentTheme = config.theme;
-        let connectionMode = 'initializing'; // 'realtime', 'polling', 'offline'
+        let connectionMode = 'initializing';
         let lastCheckTime = new Date().toISOString();
         let pollingInterval = null;
+        let overlaySocket = null;
 
-        // ========== ОСНОВНАЯ ИНИЦИАЛИЗАЦИЯ ==========
-        document.addEventListener('supabase-loaded', initializeOverlay);
+        function apiUrl(path) {
+            return path;
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeOverlay);
 
         async function initializeOverlay() {
-            console.log('🎬 OBS Overlay: Инициализация...');
-            updateStatus('🔍 Поиск стримера...');
-            
-            // Показать конфигурацию
-            console.log('⚙️ Конфигурация:', config);
+            updateStatus('Поиск стримера...');
             if (config.debug) {
                 document.getElementById('debug-controls').classList.add('active');
             }
+            if (!config.username) {
+                updateStatus('В ссылке нет ?user=', 'error');
+                showErrorMessage('Добавьте в ссылку ?user=ваш_ник');
+                return;
+            }
 
             try {
-                // Получаем профиль стримера
-                const { data: profile, error } = await window.supabase
-                    .from('profiles')
-                    .select('id, username, display_name')
-                    .eq('username', config.username)
-                    .single();
-
-                if (error || !profile) {
-                    updateStatus(`❌ Стример "${config.username}" не найден`, 'error');
-                    showErrorMessage(`Стример "${config.username}" не найден`);
-                    return;
-                }
+                const profile = await fetch(apiUrl('/api/profiles/' + encodeURIComponent(config.username))).then((r) => {
+                    if (!r.ok) throw new Error('not found');
+                    return r.json();
+                });
 
                 currentProfileId = profile.id;
                 document.getElementById('streamer-id').textContent = profile.id.substring(0, 8) + '...';
-                updateStatus(`✅ Стример: ${profile.display_name || profile.username}`);
-                
-                // Применяем тему
-                document.body.classList.add(`theme-${currentTheme}`);
+                updateStatus('Стример: ' + (profile.display_name || profile.username), 'success');
+                document.body.classList.add('theme-' + currentTheme);
+                lastCheckTime = new Date().toISOString();
 
-                // Загружаем последние донаты
-                await loadRecentDonations(profile.id);
-
-                // Пытаемся использовать Realtime
                 if (config.useRealtime) {
-                    await setupRealtime(profile.id);
-                    
-                    // Если Realtime не подключился за 10 секунд, переключаемся на polling
+                    setupRealtime(profile.id);
                     setTimeout(() => {
-                        if (connectionMode !== 'realtime') {
-                            console.log('⏰ Realtime timeout, switching to polling...');
-                            setupPolling(profile.id);
-                        }
-                    }, 10000);
+                        if (connectionMode !== 'realtime') setupPolling(profile.id);
+                    }, 4000);
                 } else {
-                    // Если Realtime отключен в настройках
                     setupPolling(profile.id);
                 }
-
             } catch (error) {
-                console.error('❌ Ошибка инициализации:', error);
-                updateStatus('❌ Ошибка подключения', 'error');
-                showErrorMessage('Ошибка подключения к серверу');
+                updateStatus('Стример не найден', 'error');
+                showErrorMessage('Стример "' + config.username + '" не найден');
             }
         }
 
-        // ========== REALTIME ПОДКЛЮЧЕНИЕ ==========
-        async function setupRealtime(profileId) {
-            console.log('🔌 Пробую подключиться к Realtime...');
-            updateStatus('🔌 Подключение к Realtime...');
-            
-            try {
-                const channel = window.supabase.channel(`donations-${profileId}`, {
-                    config: {
-                        broadcast: { ack: false },
-                        presence: { key: profileId }
-                    }
-                });
-                
-                // Настраиваем обработчик новых донатов
-                channel.on(
-                    'postgres_changes',
-                    {
-                        event: 'INSERT',
-                        schema: 'public',
-                        table: 'donations',
-                        filter: `profile_id=eq.${profileId}`
-                    },
-                    (payload) => {
-                        console.log('🎯 Новый донат через Realtime:', payload.new);
-                        addDonation(payload.new);
-                    }
-                ).subscribe((status) => {
-                    console.log('📡 Realtime статус:', status);
-                    
-                    if (status === 'SUBSCRIBED') {
-                        connectionMode = 'realtime';
-                        document.getElementById('mode').textContent = 'Realtime';
-                        updateStatus('✅ Realtime подключен', 'success');
-                        console.log('✅ Realtime успешно подключен!');
-                        
-                        // Останавливаем polling, если он был
-                        if (pollingInterval) {
-                            clearInterval(pollingInterval);
-                            pollingInterval = null;
-                        }
-                    } else if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
-                        updateStatus('⚠️ Realtime ошибка, переключаюсь на polling...', 'warning');
-                        setupPolling(profileId);
-                    }
-                });
+        function setupRealtime(profileId) {
+            updateStatus('Подключение к WebSocket...');
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const socket = new WebSocket(proto + '//' + location.host + '/ws/donations?profile_id=' + encodeURIComponent(profileId));
+            overlaySocket = socket;
 
-            } catch (error) {
-                console.error('❌ Ошибка Realtime:', error);
-                setupPolling(profileId);
-            }
+            socket.onopen = () => {
+                connectionMode = 'realtime';
+                document.getElementById('mode').textContent = 'WebSocket';
+                updateStatus('Оверлей подключен', 'success');
+                if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                }
+            };
+            socket.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'ping') return;
+                if (msg.type === 'donation.new' && msg.data) addDonation(msg.data);
+            };
+            socket.onclose = () => {
+                if (connectionMode === 'realtime') {
+                    connectionMode = 'initializing';
+                    setupPolling(profileId);
+                }
+            };
+            socket.onerror = () => setupPolling(profileId);
         }
 
-        // ========== POLLING (резервный метод) ==========
         function setupPolling(profileId) {
             if (connectionMode === 'polling') return;
-            
-            console.log('🔄 Настраиваю polling (опрос каждые 3 секунды)...');
             connectionMode = 'polling';
             document.getElementById('mode').textContent = 'Polling';
-            updateStatus('🔄 Использую polling...', 'warning');
-            
-            // Очищаем предыдущий интервал, если был
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-            }
-            
-            // Функция проверки новых донатов
+            updateStatus('Резервный опрос каждые 3 секунды', 'warning');
+            if (pollingInterval) clearInterval(pollingInterval);
+
             async function checkNewDonations() {
                 try {
-                    const { data: newDonations, error } = await window.supabase
-                        .from('donations')
-                        .select('*')
-                        .eq('profile_id', profileId)
-                        .gt('created_at', lastCheckTime)
-                        .order('created_at', { ascending: true });
-                    
-                    if (error) {
-                        console.error('❌ Ошибка polling:', error);
-                        return;
-                    }
-                    
-                    if (newDonations && newDonations.length > 0) {
-                        console.log(`📥 Найдено новых донатов: ${newDonations.length}`);
-                        newDonations.forEach(donation => {
-                            addDonation(donation);
-                        });
-                        lastCheckTime = new Date().toISOString();
-                        updateStatus(`📥 Получено: ${newDonations.length} донат(ов)`, 'success');
-                    }
+                    const rows = await fetch(apiUrl('/api/donations?profile_id=' + encodeURIComponent(profileId) + '&since=' + encodeURIComponent(lastCheckTime) + '&limit=50')).then((r) => r.json());
+                    if (!Array.isArray(rows) || !rows.length) return;
+                    rows.forEach((donation) => addDonation(donation));
+                    lastCheckTime = new Date().toISOString();
                 } catch (error) {
-                    console.error('❌ Ошибка в polling:', error);
+                    console.error(error);
                 }
             }
-            
-            // Запускаем проверку каждые 3 секунды
             pollingInterval = setInterval(checkNewDonations, 3000);
-            
-            // Первая проверка сразу
             checkNewDonations();
-        }
-
-        // ========== ЗАГРУЗКА ПОСЛЕДНИХ ДОНАТОВ ==========
-        async function loadRecentDonations(profileId) {
-            try {
-                const { data: recentDonations } = await window.supabase
-                    .from('donations')
-                    .select('*')
-                    .eq('profile_id', profileId)
-                    .order('created_at', { descending: true })
-                    .limit(config.maxDonations);
-                
-                if (recentDonations && recentDonations.length > 0) {
-                    console.log(`📚 Загружено последних донатов: ${recentDonations.length}`);
-                    // Показываем в обратном порядке (старые первыми)
-                    recentDonations.reverse().forEach(donation => {
-                        addDonation(donation, true); // true = без анимации
-                    });
-                }
-            } catch (error) {
-                console.error('❌ Ошибка загрузки истории:', error);
-            }
         }
 
         // ========== ДОБАВЛЕНИЕ ДОНАТА НА ЭКРАН ==========
         function addDonation(donation, skipAnimation = false) {
+            if (donation.id && seenDonationIds.has(donation.id)) return;
+            if (donation.id) seenDonationIds.add(donation.id);
             donationsCount++;
             document.getElementById('counter').textContent = donationsCount;
 
