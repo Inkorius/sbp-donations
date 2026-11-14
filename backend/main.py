@@ -21,7 +21,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -305,8 +305,10 @@ async def lifespan(_app: FastAPI):
     global pool
     if not JWT_SECRET:
         raise RuntimeError("JWT_SECRET is required")
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    (UPLOAD_DIR / "tts").mkdir(parents=True, exist_ok=True)
+    try:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logging.warning("UPLOAD_DIR is not writable: %s", UPLOAD_DIR)
     dsn, ssl = parse_database_url()
     pool_kwargs: dict = {"dsn": dsn, "min_size": 1, "max_size": 10}
     if ssl is not None:
@@ -729,27 +731,39 @@ async def upload_alert_sound(
     return row_to_profile(row)
 
 
+async def synthesize_speech(text: str) -> bytes:
+    import edge_tts
+
+    chunks: list[bytes] = []
+    communicate = edge_tts.Communicate(text, "ru-RU-DmitryNeural")
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            chunks.append(chunk["data"])
+    data = b"".join(chunks)
+    if not data:
+        raise RuntimeError("empty tts audio")
+    return data
+
+
 @app.get("/api/tts", summary="Озвучка доната")
 async def overlay_tts(request: Request, text: str = Query(..., min_length=1, max_length=500)):
     clean = re.sub(r"\s+", " ", text).strip()
     if not clean:
         raise HTTPException(status_code=400, detail=msg(request, "tts_fail"))
-    tts_dir = UPLOAD_DIR / "tts"
-    tts_dir.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256(clean.encode("utf-8")).hexdigest()
-    path = tts_dir / f"{digest}.mp3"
-    if not path.is_file():
-        try:
-            import edge_tts
-
-            tmp = path.with_suffix(".tmp.mp3")
-            communicate = edge_tts.Communicate(clean, "ru-RU-DmitryNeural")
-            await communicate.save(str(tmp))
-            tmp.replace(path)
-        except Exception as exc:
-            logging.exception("TTS failed")
-            raise HTTPException(status_code=502, detail=msg(request, "tts_fail")) from exc
-    return FileResponse(path, media_type="audio/mpeg", filename="tts.mp3")
+    try:
+        payload = await asyncio.wait_for(synthesize_speech(clean), timeout=30)
+    except Exception as exc:
+        logging.exception("TTS failed")
+        raise HTTPException(status_code=502, detail=msg(request, "tts_fail")) from exc
+    return Response(
+        content=payload,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": "inline",
+            "Accept-Ranges": "bytes",
+        },
+    )
 
 
 @app.get("/api/profiles/{username}", summary="Публичный профиль стримера")

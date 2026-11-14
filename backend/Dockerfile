@@ -4,6 +4,9 @@ WORKDIR /tmp/build
 COPY . .
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 RUN set -e; \
     if [ -f /tmp/build/backend/requirements.txt ]; then \
       pip install --no-cache-dir -r /tmp/build/backend/requirements.txt; \
