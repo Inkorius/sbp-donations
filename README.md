@@ -2,7 +2,7 @@
 
 Открытое веб-приложение: зритель переводит стримеру по СБП, стример видит донат в панели, OBS-оверлей показывает и озвучивает только **подтверждённые** донаты.
 
-Работает на своём сервере: **FastAPI + PostgreSQL**, сайт и API — [https://api.sbpdonation.ru](https://api.sbpdonation.ru). Supabase и GitHub Pages больше не используются.
+Работает на своём сервере: **FastAPI + PostgreSQL**, сайт и API — [https://sbpdonation.ru](https://sbpdonation.ru). Supabase и GitHub Pages больше не используются.
 
 ## Возможности
 
@@ -29,7 +29,7 @@
 
 ## Ссылки
 
-- Сайт: https://api.sbpdonation.ru/
+- Сайт: https://sbpdonation.ru/
 - Репозиторий: https://github.com/Inkorius/sbp-donations
 
 ## Стек
@@ -42,7 +42,7 @@
 
 ## Быстрый старт для стримера
 
-1. Откройте https://api.sbpdonation.ru/ и зарегистрируйтесь.
+1. Откройте https://sbpdonation.ru/ и зарегистрируйтесь.
 2. Загрузите QR СБП, сохраните имя на странице.
 3. Скопируйте ссылку для зрителей.
 4. В блоке OBS соберите URL оверлея и вставьте в OBS (в источнике включите звук).
