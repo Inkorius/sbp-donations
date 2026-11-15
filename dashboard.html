@@ -226,7 +226,19 @@
                 <option value="72">72</option>
                 <option value="96">96</option>
             </select>
+            <label for="obs-color" data-i18n="dash.obs.color">Цвет текста</label>
+            <input type="color" id="obs-color" value="#ffffff">
+            <label for="obs-duration" data-i18n="dash.obs.duration">Время показа</label>
+            <select id="obs-duration">
+                <option value="5000">5 с</option>
+                <option value="8000">8 с</option>
+                <option value="10000" selected>10 с</option>
+                <option value="12000">12 с</option>
+                <option value="15000">15 с</option>
+                <option value="20000">20 с</option>
+            </select>
         </div>
+        <p data-i18n="dash.obs.duration.hint">Текст держится выбранное время. Если озвучка длиннее — текст остаётся до конца голоса.</p>
         <p data-i18n="dash.obs.sound.hint">Звук уведомления играет перед озвучкой. Если файл не загружен — после паузы 5 секунд сразу текст и голос.</p>
         <div class="obs-row">
             <input type="file" id="obs-sound-upload" accept="audio/mpeg,audio/wav,audio/ogg,.mp3,.wav,.ogg">
@@ -286,6 +298,8 @@
             const obsDebugBtn = document.getElementById('obs-debug-btn')
             const obsFontEl = document.getElementById('obs-font')
             const obsSizeEl = document.getElementById('obs-size')
+            const obsColorEl = document.getElementById('obs-color')
+            const obsDurationEl = document.getElementById('obs-duration')
             const obsSoundUploadEl = document.getElementById('obs-sound-upload')
             const obsSoundUploadBtn = document.getElementById('obs-sound-upload-btn')
             const obsSoundClearBtn = document.getElementById('obs-sound-clear-btn')
@@ -300,6 +314,8 @@
                 debug: localStorage.getItem('sbp_obs_debug') === '1',
                 font: localStorage.getItem('sbp_obs_font') || 'Arial',
                 size: localStorage.getItem('sbp_obs_size') || '56',
+                color: localStorage.getItem('sbp_obs_color') || '#ffffff',
+                duration: localStorage.getItem('sbp_obs_duration') || '10000',
             }
             const noticeOverlay = document.getElementById('notice-overlay')
             const noticeText = document.getElementById('notice-text')
@@ -368,8 +384,20 @@
                 localStorage.setItem('sbp_obs_size', obsSettings.size)
                 refreshObsLink()
             })
+            obsColorEl.addEventListener('input', () => {
+                obsSettings.color = obsColorEl.value
+                localStorage.setItem('sbp_obs_color', obsSettings.color)
+                refreshObsLink()
+            })
+            obsDurationEl.addEventListener('change', () => {
+                obsSettings.duration = obsDurationEl.value
+                localStorage.setItem('sbp_obs_duration', obsSettings.duration)
+                refreshObsLink()
+            })
             obsFontEl.value = obsSettings.font
             obsSizeEl.value = obsSettings.size
+            obsColorEl.value = obsSettings.color
+            obsDurationEl.value = obsSettings.duration
             refreshObsLink()
             obsSoundUploadBtn.addEventListener('click', uploadAlertSound)
             obsSoundClearBtn.addEventListener('click', clearAlertSound)
@@ -990,6 +1018,8 @@
                 params.set('user', username)
                 params.set('font', obsSettings.font)
                 params.set('size', obsSettings.size)
+                params.set('color', (obsSettings.color || '#ffffff').replace('#', ''))
+                params.set('duration', obsSettings.duration || '10000')
                 if (obsSettings.tts) params.set('tts', '1')
                 if (obsSettings.debug) params.set('debug', '1')
                 obsLinkEl.textContent = `${window.location.origin}${window.sbpApi.page('obs-overlay.html')}?${params.toString()}`

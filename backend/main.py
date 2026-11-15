@@ -446,7 +446,7 @@ class DonationCreate(BaseModel):
     profile_id: UUID
     donor_name: str = Field(min_length=1, max_length=100)
     amount: Decimal = Field(gt=0)
-    message: Optional[str] = Field(default=None, max_length=500)
+    message: Optional[str] = Field(default=None, max_length=200)
     tts_voice: Optional[str] = Field(default="irina", max_length=40)
 
 

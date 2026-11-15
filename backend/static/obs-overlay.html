@@ -187,8 +187,8 @@
 <body>
     <!-- Контейнер для донатов -->
     <div id="donations-container"></div>
-    <audio id="alert-player" preload="auto" playsinline autoplay></audio>
-    <audio id="voice-player" preload="auto" playsinline autoplay></audio>
+    <audio id="alert-player" preload="auto" playsinline></audio>
+    <audio id="voice-player" preload="auto" playsinline></audio>
     <audio id="unlock-player" preload="auto" playsinline autoplay muted loop></audio>
 
     <!-- Статус подключения -->
@@ -449,15 +449,15 @@
                 const ttsUrl = config.tts
                     ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)) + '&voice=' + encodeURIComponent(donation.tts_voice || 'irina'))
                     : null;
-                const waitAndPrepare = [sleep(5000)];
-                if (ttsUrl) {
-                    const voicePlayer = document.getElementById('voice-player');
-                    voicePlayer.src = ttsUrl;
-                    voicePlayer.load();
+                const voicePlayer = document.getElementById('voice-player');
+                const alertPlayer = document.getElementById('alert-player');
+                if (voicePlayer) {
+                    voicePlayer.pause();
+                    voicePlayer.removeAttribute('src');
                 }
-                await Promise.all(waitAndPrepare);
+                await sleep(5000);
                 if (alertSoundUrl) {
-                    await playAudio(alertSoundUrl, document.getElementById('alert-player'));
+                    await playAudio(alertSoundUrl, alertPlayer);
                 }
                 await presentDonation(donation, ttsUrl);
             }

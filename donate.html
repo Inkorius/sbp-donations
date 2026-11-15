@@ -181,6 +181,14 @@
             resize: vertical;
         }
 
+        .char-count {
+            display: block;
+            margin-top: 6px;
+            font-size: 0.85rem;
+            color: #888;
+            text-align: right;
+        }
+
         .submit-btn {
             background: linear-gradient(135deg, #7c4dff 0%, #651fff 100%);
             color: white;
@@ -407,7 +415,8 @@
                     
                     <div class="form-group">
                         <label for="message" data-i18n="donate.message">Сообщение для стримера</label>
-                        <textarea id="message" data-i18n-placeholder="donate.messagePh" placeholder="Напишите что-нибудь приятное..."></textarea>
+                        <textarea id="message" maxlength="200" data-i18n-placeholder="donate.messagePh" placeholder="Напишите что-нибудь приятное..."></textarea>
+                        <span class="char-count" id="message-count">0 / 200</span>
                     </div>
                     <div class="form-group">
                         <label for="tts-voice" data-i18n="donate.voice">Голос озвучки</label>
@@ -452,6 +461,18 @@
             const qrCodeContainerEl = document.getElementById('qr-code-container');
             const donationFormEl = document.getElementById('donation-form');
             const yookassaPayBtn = document.getElementById('yookassa-pay-btn');
+            const messageEl = document.getElementById('message');
+            const messageCountEl = document.getElementById('message-count');
+            const MESSAGE_MAX = 200;
+            function updateMessageCount() {
+                if (messageCountEl && messageEl) {
+                    messageCountEl.textContent = (messageEl.value || '').length + ' / ' + MESSAGE_MAX;
+                }
+            }
+            if (messageEl) {
+                messageEl.addEventListener('input', updateMessageCount);
+                updateMessageCount();
+            }
             const successMessageEl = document.getElementById('success-message');
             const errorMessageEl = document.getElementById('error-message');
             const qrSection = document.querySelector('.qr-section');
@@ -563,7 +584,7 @@
             async function createPendingDonation() {
                 const donorName = document.getElementById('donor-name').value.trim();
                 const amount = parseFloat(document.getElementById('amount').value);
-                const message = document.getElementById('message').value.trim();
+                const message = document.getElementById('message').value.trim().slice(0, MESSAGE_MAX);
                 const ttsVoice = document.getElementById('tts-voice').value;
                 if (!donorName || !amount || amount < 10) {
                     showMessage(t('donate.badAmount'), 'error');
