@@ -359,9 +359,12 @@ async def lifespan(_app: FastAPI):
     pool = await asyncpg.create_pool(**pool_kwargs)
     await init_schema(pool)
     asyncio.create_task(warmup_piper_voices())
-    from nalog_service import receipts_retry_loop
+    try:
+        from nalog_service import receipts_retry_loop
 
-    asyncio.create_task(receipts_retry_loop(pool))
+        asyncio.create_task(receipts_retry_loop(pool))
+    except Exception:
+        logging.exception("Мой Налог retry loop not started")
     try:
         yield
     finally:

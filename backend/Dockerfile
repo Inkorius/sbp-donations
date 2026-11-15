@@ -9,12 +9,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 RUN set -e; \
     if [ -f /tmp/build/backend/requirements.txt ]; then \
-      pip install --no-cache-dir -r /tmp/build/backend/requirements.txt; \
-      cp /tmp/build/backend/main.py /app/main.py; \
+      SRC=/tmp/build/backend; \
     else \
-      pip install --no-cache-dir -r /tmp/build/requirements.txt; \
-      cp /tmp/build/main.py /app/main.py; \
+      SRC=/tmp/build; \
     fi; \
+    pip install --no-cache-dir -r "$SRC/requirements.txt"; \
+    cp "$SRC"/*.py /app/; \
     mkdir -p /app/static/js /app/uploads; \
     cp /tmp/build/*.html /app/static/ 2>/dev/null || true; \
     cp /tmp/build/js/*.js /app/static/js/ 2>/dev/null || true; \
