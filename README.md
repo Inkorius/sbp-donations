@@ -2,7 +2,7 @@
 
 Открытое веб-приложение: зритель переводит стримеру по СБП, стример видит донат в панели, OBS-оверлей показывает и озвучивает только **подтверждённые** донаты.
 
-Работает на своём сервере: **FastAPI + PostgreSQL**, сайт и API — [https://sbpdonation.ru](https://sbpdonation.ru). Supabase и GitHub Pages больше не используются.
+Работает на своём сервере: **FastAPI + PostgreSQL**, сайт и API — [https://sbpdonation.ru](https://sbpdonation.ru).
 
 ## Возможности
 
