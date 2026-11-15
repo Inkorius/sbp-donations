@@ -17,8 +17,10 @@ RUN set -e; \
     cp "$SRC"/*.py /app/; \
     mkdir -p /app/static/js /app/uploads; \
     cp /tmp/build/*.html /app/static/ 2>/dev/null || true; \
+    cp /tmp/build/*.ico /app/static/ 2>/dev/null || true; \
     cp /tmp/build/js/*.js /app/static/js/ 2>/dev/null || true; \
     cp /tmp/build/static/*.html /app/static/ 2>/dev/null || true; \
+    cp /tmp/build/static/*.ico /app/static/ 2>/dev/null || true; \
     cp /tmp/build/static/js/*.js /app/static/js/ 2>/dev/null || true; \
     chmod -R a+rX /app/static; \
     chmod 777 /app/uploads

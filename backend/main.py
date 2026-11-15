@@ -1293,6 +1293,14 @@ async def uploaded_file(name: str):
     return FileResponse(path)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    path = STATIC_DIR / "favicon.ico"
+    if path.is_file():
+        return FileResponse(path, media_type="image/x-icon")
+    raise HTTPException(status_code=404, detail="not found")
+
+
 @app.get("/", include_in_schema=False)
 async def home_page():
     index = STATIC_DIR / "index.html"
