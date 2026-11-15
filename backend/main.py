@@ -17,6 +17,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from uuid import UUID, uuid4
 
 import asyncpg
+import httpx
 import jwt
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -63,6 +64,10 @@ class DonationHub:
 
 hub = DonationHub()
 
+YOOKASSA_API = "https://api.yookassa.ru/v3"
+YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "").strip()
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "").strip()
+YOOKASSA_RETURN_URL = os.getenv("YOOKASSA_RETURN_URL", "https://sbpdonation.ru/donate.html?success=1").strip()
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALG = "HS256"
 JWT_EXPIRE_HOURS = 72
@@ -95,6 +100,9 @@ TEXTS = {
         "tts_fail": "Не удалось создать озвучку",
         "bad_color": "Цвет кружка должен быть в формате #RRGGBB",
         "confirm_own": "Можно менять только свои донаты",
+        "yookassa_off": "ЮKassa не подключена",
+        "yookassa_fail": "Не удалось создать платёж ЮKassa",
+        "yookassa_paid": "Этот донат уже подтверждён",
     },
     "en": {
         "email_taken": "This email is already registered",
@@ -112,6 +120,9 @@ TEXTS = {
         "tts_fail": "Could not generate voice audio",
         "bad_color": "Circle color must be in #RRGGBB format",
         "confirm_own": "You can only change your own donations",
+        "yookassa_off": "YooKassa is not connected",
+        "yookassa_fail": "Could not create a YooKassa payment",
+        "yookassa_paid": "This donation is already confirmed",
     },
 }
 
@@ -263,6 +274,9 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS matched_at TIMESTAMPTZ",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS tts_voice TEXT",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS yookassa_payment_id TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_shop_id TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_secret_key TEXT",
     """
     CREATE INDEX IF NOT EXISTS idx_donations_profile_created
       ON donations (profile_id, created_at DESC)
@@ -412,6 +426,8 @@ class ProfileOut(BaseModel):
     avatar_url: Optional[str]
     avatar_color: Optional[str]
     alert_sound_url: Optional[str] = None
+    yookassa_enabled: bool = False
+    yookassa_shop_id: Optional[str] = None
     created_at: datetime
 
 
@@ -421,6 +437,9 @@ class ProfileUpdate(BaseModel):
     avatar_color: Optional[str] = Field(default=None, max_length=7)
     clear_avatar: Optional[bool] = None
     clear_alert_sound: Optional[bool] = None
+    yookassa_shop_id: Optional[str] = Field(default=None, max_length=64)
+    yookassa_secret_key: Optional[str] = Field(default=None, max_length=200)
+    clear_yookassa: Optional[bool] = None
 
 
 class DonationCreate(BaseModel):
@@ -439,15 +458,43 @@ class DonationOut(BaseModel):
     message: Optional[str]
     status: str
     tts_voice: Optional[str] = None
+    confirmed_at: Optional[datetime] = None
+    yookassa_payment_id: Optional[str] = None
     created_at: datetime
+
+
+class YookassaPaymentOut(BaseModel):
+    donation_id: UUID
+    payment_id: str
+    confirmation_url: str
+    status: str
 
 
 class DonationStatusUpdate(BaseModel):
     status: Literal["confirmed", "rejected"]
 
 
-def row_to_profile(row: asyncpg.Record) -> ProfileOut:
+def yookassa_env_ready() -> bool:
+    return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
+
+
+def profile_yookassa_auth(row: Optional[asyncpg.Record]) -> Optional[tuple[str, str]]:
+    if row:
+        keys = set(row.keys())
+        shop = (row["yookassa_shop_id"] or "").strip() if "yookassa_shop_id" in keys else ""
+        secret = (row["yookassa_secret_key"] or "").strip() if "yookassa_secret_key" in keys else ""
+        if shop and secret:
+            return shop, secret
+    if yookassa_env_ready():
+        return YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+    return None
+
+
+def row_to_profile(row: asyncpg.Record, *, public: bool = True) -> ProfileOut:
     keys = set(row.keys())
+    shop = (row["yookassa_shop_id"] or "").strip() if "yookassa_shop_id" in keys and row["yookassa_shop_id"] else ""
+    secret = (row["yookassa_secret_key"] or "").strip() if "yookassa_secret_key" in keys and row["yookassa_secret_key"] else ""
+    enabled = bool(shop and secret) or yookassa_env_ready()
     return ProfileOut(
         id=row["id"],
         username=row["username"],
@@ -457,6 +504,8 @@ def row_to_profile(row: asyncpg.Record) -> ProfileOut:
         avatar_url=row["avatar_url"],
         avatar_color=row["avatar_color"] if "avatar_color" in keys else None,
         alert_sound_url=row["alert_sound_url"] if "alert_sound_url" in keys else None,
+        yookassa_enabled=enabled,
+        yookassa_shop_id=None if public else (shop or None),
         created_at=row["created_at"],
     )
 
@@ -471,8 +520,48 @@ def row_to_donation(row: asyncpg.Record) -> DonationOut:
         message=row["message"],
         status=row["status"],
         tts_voice=row["tts_voice"] if "tts_voice" in keys else None,
+        confirmed_at=row["confirmed_at"] if "confirmed_at" in keys else None,
+        yookassa_payment_id=row["yookassa_payment_id"] if "yookassa_payment_id" in keys else None,
         created_at=row["created_at"],
     )
+
+
+async def broadcast_donation(event: str, donation: DonationOut) -> None:
+    await hub.broadcast(
+        str(donation.profile_id),
+        {"type": event, "data": donation.model_dump(mode="json")},
+    )
+
+
+async def mark_donation_confirmed(donation_id: UUID, payment_id: Optional[str] = None) -> Optional[DonationOut]:
+    row = await pool.fetchrow(
+        """
+        UPDATE donations
+        SET
+            status = 'confirmed',
+            confirmed_at = COALESCE(confirmed_at, NOW()),
+            yookassa_payment_id = COALESCE($2, yookassa_payment_id),
+            payment_ref = COALESCE($2, payment_ref),
+            payment_source = CASE WHEN $2 IS NULL THEN payment_source ELSE 'yookassa' END
+        WHERE id = $1 AND status <> 'rejected'
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, confirmed_at, yookassa_payment_id, created_at
+        """,
+        donation_id,
+        payment_id,
+    )
+    if not row:
+        return None
+    donation = row_to_donation(row)
+    await broadcast_donation("donation.confirmed", donation)
+    return donation
+
+
+def yookassa_return_url(username: str) -> str:
+    base = YOOKASSA_RETURN_URL
+    sep = "&" if "?" in base else "?"
+    if "user=" in base:
+        return base
+    return f"{base}{sep}user={username}&paid=1"
 
 
 def resolve_tts_voice(name: Optional[str]) -> str:
@@ -675,7 +764,7 @@ async def my_profile(request: Request, user: asyncpg.Record = Depends(current_us
     row = await pool.fetchrow("SELECT * FROM profiles WHERE id = $1", user["id"])
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
-    return row_to_profile(row)
+    return row_to_profile(row, public=False)
 
 
 @app.patch("/api/profiles/me", summary="Обновить профиль")
@@ -689,6 +778,8 @@ async def update_my_profile(
         if not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
             raise HTTPException(status_code=400, detail=msg(request, "bad_color"))
         color = color.lower()
+    shop = body.yookassa_shop_id.strip() if body.yookassa_shop_id else None
+    secret = body.yookassa_secret_key.strip() if body.yookassa_secret_key else None
     row = await pool.fetchrow(
         """
         UPDATE profiles
@@ -698,6 +789,8 @@ async def update_my_profile(
             avatar_color = COALESCE($4, avatar_color),
             avatar_url = CASE WHEN $5 THEN NULL ELSE avatar_url END,
             alert_sound_url = CASE WHEN $6 THEN NULL ELSE alert_sound_url END,
+            yookassa_shop_id = CASE WHEN $7 THEN NULL ELSE COALESCE($8, yookassa_shop_id) END,
+            yookassa_secret_key = CASE WHEN $7 THEN NULL ELSE COALESCE($9, yookassa_secret_key) END,
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -708,10 +801,13 @@ async def update_my_profile(
         color,
         bool(body.clear_avatar),
         bool(body.clear_alert_sound),
+        bool(body.clear_yookassa),
+        shop,
+        secret,
     )
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
-    return row_to_profile(row)
+    return row_to_profile(row, public=False)
 
 
 async def save_profile_image(
@@ -868,7 +964,7 @@ async def create_donation(request: Request, body: DonationCreate) -> DonationOut
         """
         INSERT INTO donations (profile_id, donor_name, amount, message, status, tts_voice)
         VALUES ($1, $2, $3, $4, 'pending', $5)
-        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, created_at
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, confirmed_at, yookassa_payment_id, created_at
         """,
         body.profile_id,
         body.donor_name.strip(),
@@ -877,11 +973,139 @@ async def create_donation(request: Request, body: DonationCreate) -> DonationOut
         resolve_tts_voice(body.tts_voice),
     )
     donation = row_to_donation(row)
-    await hub.broadcast(
-        str(body.profile_id),
-        {"type": "donation.new", "data": donation.model_dump(mode="json")},
-    )
+    await broadcast_donation("donation.new", donation)
     return donation
+
+
+@app.post("/api/donations/{donation_id}/yookassa", summary="Создать платёж СБП через ЮKassa")
+async def create_yookassa_payment(request: Request, donation_id: UUID) -> YookassaPaymentOut:
+    donation_row = await pool.fetchrow("SELECT * FROM donations WHERE id = $1", donation_id)
+    if not donation_row:
+        raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
+    if donation_row["status"] == "confirmed":
+        raise HTTPException(status_code=409, detail=msg(request, "yookassa_paid"))
+    if donation_row["status"] == "rejected":
+        raise HTTPException(status_code=409, detail=msg(request, "yookassa_fail"))
+    profile = await pool.fetchrow("SELECT * FROM profiles WHERE id = $1", donation_row["profile_id"])
+    auth = profile_yookassa_auth(profile)
+    if not auth:
+        raise HTTPException(status_code=400, detail=msg(request, "yookassa_off"))
+    shop_id, secret_key = auth
+    amount = Decimal(donation_row["amount"]).quantize(Decimal("0.01"))
+    payload = {
+        "amount": {"value": f"{amount:.2f}", "currency": "RUB"},
+        "capture": True,
+        "payment_method_data": {"type": "sbp"},
+        "confirmation": {
+            "type": "redirect",
+            "return_url": yookassa_return_url(profile["username"] if profile else ""),
+        },
+        "description": f"Донат для {profile['username'] if profile else 'стримера'}",
+        "metadata": {"donation_id": str(donation_id)},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{YOOKASSA_API}/payments",
+                auth=(shop_id, secret_key),
+                headers={
+                    "Idempotence-Key": str(uuid4()),
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        logging.exception("YooKassa create failed")
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_fail")) from exc
+    if response.status_code >= 400:
+        logging.error("YooKassa create error %s %s", response.status_code, response.text)
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_fail"))
+    data = response.json()
+    confirmation = data.get("confirmation") or {}
+    confirmation_url = confirmation.get("confirmation_url")
+    payment_id = data.get("id")
+    if not confirmation_url or not payment_id:
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_fail"))
+    await pool.execute(
+        """
+        UPDATE donations
+        SET yookassa_payment_id = $2, payment_ref = $2, payment_source = 'yookassa'
+        WHERE id = $1
+        """,
+        donation_id,
+        payment_id,
+    )
+    return YookassaPaymentOut(
+        donation_id=donation_id,
+        payment_id=payment_id,
+        confirmation_url=confirmation_url,
+        status=data.get("status") or "pending",
+    )
+
+
+@app.post("/api/yookassa/webhook", summary="Вебхук ЮKassa")
+async def yookassa_webhook(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail=msg(request, "validation"))
+    event = body.get("event")
+    obj = body.get("object") or {}
+    payment_id = obj.get("id")
+    if event != "payment.succeeded" or not payment_id:
+        return JSONResponse({"ok": True, "ignored": True})
+    metadata = obj.get("metadata") or {}
+    donation_id_raw = metadata.get("donation_id")
+    donation_row = None
+    if donation_id_raw:
+        try:
+            donation_row = await pool.fetchrow(
+                "SELECT * FROM donations WHERE id = $1",
+                UUID(str(donation_id_raw)),
+            )
+        except Exception:
+            donation_row = None
+    if not donation_row:
+        donation_row = await pool.fetchrow(
+            "SELECT * FROM donations WHERE yookassa_payment_id = $1",
+            payment_id,
+        )
+    if not donation_row:
+        logging.warning("YooKassa webhook for unknown donation payment %s", payment_id)
+        return JSONResponse({"ok": True, "unknown": True})
+    profile = await pool.fetchrow("SELECT * FROM profiles WHERE id = $1", donation_row["profile_id"])
+    auth = profile_yookassa_auth(profile)
+    if not auth:
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_off"))
+    shop_id, secret_key = auth
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            verify = await client.get(
+                f"{YOOKASSA_API}/payments/{payment_id}",
+                auth=(shop_id, secret_key),
+            )
+    except httpx.HTTPError as exc:
+        logging.exception("YooKassa verify failed")
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_fail")) from exc
+    if verify.status_code >= 400:
+        raise HTTPException(status_code=502, detail=msg(request, "yookassa_fail"))
+    payment = verify.json()
+    if payment.get("status") != "succeeded" or payment.get("paid") is not True:
+        return JSONResponse({"ok": True, "ignored": True})
+    try:
+        paid = Decimal(str((payment.get("amount") or {}).get("value") or "0"))
+    except Exception:
+        paid = Decimal("0")
+    if paid.quantize(Decimal("0.01")) != Decimal(donation_row["amount"]).quantize(Decimal("0.01")):
+        logging.warning(
+            "YooKassa amount mismatch donation=%s paid=%s expected=%s",
+            donation_row["id"],
+            paid,
+            donation_row["amount"],
+        )
+        return JSONResponse({"ok": True, "mismatch": True})
+    await mark_donation_confirmed(donation_row["id"], payment_id)
+    return JSONResponse({"ok": True})
 
 
 @app.websocket("/ws/donations")
@@ -906,16 +1130,33 @@ async def list_donations(
     limit: int = Query(20, ge=1, le=100),
     since: Optional[datetime] = Query(default=None),
     since_ms: Optional[int] = Query(default=None),
+    status: Optional[str] = Query(default=None),
 ) -> list[DonationOut]:
     cutoff = None
     if since_ms is not None:
         cutoff = datetime.fromtimestamp(since_ms / 1000.0, tz=timezone.utc)
     elif since is not None:
         cutoff = since if since.tzinfo else since.replace(tzinfo=timezone.utc)
-    if cutoff:
+    confirmed_only = status == "confirmed"
+    select_cols = "id, profile_id, donor_name, amount, message, status, tts_voice, confirmed_at, yookassa_payment_id, created_at"
+    if cutoff and confirmed_only:
         rows = await pool.fetch(
-            """
-            SELECT id, profile_id, donor_name, amount, message, status, tts_voice, created_at
+            f"""
+            SELECT {select_cols}
+            FROM donations
+            WHERE profile_id = $1 AND status = 'confirmed'
+              AND COALESCE(confirmed_at, created_at) > $2
+            ORDER BY COALESCE(confirmed_at, created_at) ASC
+            LIMIT $3
+            """,
+            profile_id,
+            cutoff,
+            limit,
+        )
+    elif cutoff:
+        rows = await pool.fetch(
+            f"""
+            SELECT {select_cols}
             FROM donations
             WHERE profile_id = $1 AND created_at > $2
             ORDER BY created_at ASC
@@ -927,8 +1168,8 @@ async def list_donations(
         )
     else:
         rows = await pool.fetch(
-            """
-            SELECT id, profile_id, donor_name, amount, message, status, tts_voice, created_at
+            f"""
+            SELECT {select_cols}
             FROM donations
             WHERE profile_id = $1
             ORDER BY created_at DESC
@@ -942,15 +1183,19 @@ async def list_donations(
 
 @app.post("/api/donations/confirm-all", summary="Подтвердить все ожидающие")
 async def confirm_all(user: asyncpg.Record = Depends(current_user)):
-    result = await pool.execute(
+    rows = await pool.fetch(
         """
         UPDATE donations
-        SET status = 'confirmed', confirmed_at = NOW()
+        SET status = 'confirmed', confirmed_at = COALESCE(confirmed_at, NOW())
         WHERE profile_id = $1 AND status = 'pending'
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, confirmed_at, yookassa_payment_id, created_at
         """,
         user["id"],
     )
-    return {"updated": int(result.split()[-1])}
+    donations = [row_to_donation(row) for row in rows]
+    for donation in donations:
+        await broadcast_donation("donation.confirmed", donation)
+    return {"updated": len(donations)}
 
 
 @app.patch("/api/donations/{donation_id}", summary="Подтвердить или отклонить донат")
@@ -960,18 +1205,28 @@ async def update_donation(
     body: DonationStatusUpdate,
     user: asyncpg.Record = Depends(current_user),
 ) -> DonationOut:
-    confirmed_at = datetime.now(timezone.utc) if body.status == "confirmed" else None
+    owned = await pool.fetchval(
+        "SELECT 1 FROM donations WHERE id = $1 AND profile_id = $2",
+        donation_id,
+        user["id"],
+    )
+    if not owned:
+        raise HTTPException(status_code=404, detail=msg(request, "confirm_own"))
+    if body.status == "confirmed":
+        donation = await mark_donation_confirmed(donation_id)
+        if not donation:
+            raise HTTPException(status_code=404, detail=msg(request, "confirm_own"))
+        return donation
     row = await pool.fetchrow(
         """
         UPDATE donations
-        SET status = $3, confirmed_at = COALESCE($4, confirmed_at)
+        SET status = $3
         WHERE id = $1 AND profile_id = $2
-        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, created_at
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, confirmed_at, yookassa_payment_id, created_at
         """,
         donation_id,
         user["id"],
         body.status,
-        confirmed_at,
     )
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "confirm_own"))

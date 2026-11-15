@@ -168,6 +168,20 @@
         <div id="upload-status" style="margin-top: 10px;"></div>
     </div>
 
+    <div class="section" id="yookassa-section">
+        <h2 data-i18n="dash.yookassa">ЮKassa (СБП)</h2>
+        <p data-i18n="dash.yookassa.hint">Свой магазин ЮKassa: зритель сможет оплатить кнопкой, донат подтвердится сам. В кабинете ЮKassa укажите HTTP-уведомления: https://api.sbpdonation.ru/api/yookassa/webhook (событие payment.succeeded). Без ключей останется ручной QR и кнопка «Подтвердить».</p>
+        <div class="look-grid">
+            <label for="yookassa-shop-id" data-i18n="dash.yookassa.shop">Shop ID</label>
+            <input type="text" id="yookassa-shop-id" autocomplete="off">
+            <label for="yookassa-secret" data-i18n="dash.yookassa.secret">Секретный ключ</label>
+            <input type="password" id="yookassa-secret" autocomplete="off" placeholder="••••••••">
+        </div>
+        <button type="button" id="save-yookassa-btn" data-i18n="dash.yookassa.save">Сохранить ЮKassa</button>
+        <button type="button" id="clear-yookassa-btn" data-i18n="dash.yookassa.clear">Отключить ЮKassa</button>
+        <div id="yookassa-status" style="margin-top: 10px;"></div>
+    </div>
+
     <div class="section">
         <h2 data-i18n="dash.link">Ваша ссылка для донатов</h2>
         <div id="donate-link-container" style="display: none;">
@@ -276,6 +290,11 @@
             const obsSoundUploadBtn = document.getElementById('obs-sound-upload-btn')
             const obsSoundClearBtn = document.getElementById('obs-sound-clear-btn')
             const obsSoundStatusEl = document.getElementById('obs-sound-status')
+            const yookassaShopEl = document.getElementById('yookassa-shop-id')
+            const yookassaSecretEl = document.getElementById('yookassa-secret')
+            const yookassaStatusEl = document.getElementById('yookassa-status')
+            const saveYookassaBtn = document.getElementById('save-yookassa-btn')
+            const clearYookassaBtn = document.getElementById('clear-yookassa-btn')
             const obsSettings = {
                 tts: localStorage.getItem('sbp_obs_tts') === '1',
                 debug: localStorage.getItem('sbp_obs_debug') === '1',
@@ -354,6 +373,8 @@
             refreshObsLink()
             obsSoundUploadBtn.addEventListener('click', uploadAlertSound)
             obsSoundClearBtn.addEventListener('click', clearAlertSound)
+            saveYookassaBtn.addEventListener('click', saveYookassa)
+            clearYookassaBtn.addEventListener('click', clearYookassa)
             confirmAllBtn.addEventListener('click', confirmAllPending)
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
@@ -411,6 +432,7 @@
                     
                     currentProfile = profile
                     fillLookForm(profile)
+                    paintYookassa(profile)
                     
                     // Отображаем информацию о профиле
                     const t = window.sbpI18n.t
@@ -842,6 +864,58 @@
             }
             
             // Копирование ссылки
+            function paintYookassa(profile) {
+                const t = window.sbpI18n.t
+                yookassaShopEl.value = (profile && profile.yookassa_shop_id) || ''
+                yookassaSecretEl.value = ''
+                if (profile && profile.yookassa_enabled) {
+                    yookassaStatusEl.textContent = t('dash.yookassa.on')
+                    yookassaStatusEl.style.color = '#4CAF50'
+                } else {
+                    yookassaStatusEl.textContent = t('dash.yookassa.off')
+                    yookassaStatusEl.style.color = '#666'
+                }
+            }
+
+            async function saveYookassa() {
+                const shop = yookassaShopEl.value.trim()
+                const secret = yookassaSecretEl.value.trim()
+                if (!shop) {
+                    alert(window.sbpI18n.t('dash.yookassa.need'))
+                    return
+                }
+                if (!secret && !(currentProfile && currentProfile.yookassa_shop_id)) {
+                    alert(window.sbpI18n.t('dash.yookassa.need'))
+                    return
+                }
+                const body = { yookassa_shop_id: shop }
+                if (secret) body.yookassa_secret_key = secret
+                try {
+                    const updated = await window.sbpApi.request('/api/profiles/me', {
+                        method: 'PATCH',
+                        body: JSON.stringify(body),
+                    })
+                    currentProfile = updated
+                    paintYookassa(updated)
+                    yookassaSecretEl.value = ''
+                } catch (error) {
+                    alert(error.message)
+                }
+            }
+
+            async function clearYookassa() {
+                try {
+                    const updated = await window.sbpApi.request('/api/profiles/me', {
+                        method: 'PATCH',
+                        body: JSON.stringify({ clear_yookassa: true }),
+                    })
+                    currentProfile = updated
+                    paintYookassa(updated)
+                } catch (error) {
+                    alert(error.message)
+                }
+            }
+
             function paintAlertSound(profile) {
                 const t = window.sbpI18n.t
                 if (profile && profile.alert_sound_url) {

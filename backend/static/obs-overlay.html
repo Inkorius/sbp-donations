@@ -313,7 +313,7 @@
             socket.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'ping') return;
-                if (msg.type === 'donation.new' && msg.data) addDonation(msg.data);
+                if ((msg.type === 'donation.confirmed' || msg.type === 'donation.new') && msg.data) addDonation(msg.data);
             };
             socket.onclose = () => {
                 if (connectionMode === 'realtime') {
@@ -330,7 +330,7 @@
 
             async function checkNewDonations() {
                 try {
-                    const res = await fetch(apiUrl('/api/donations?profile_id=' + encodeURIComponent(profileId) + '&since_ms=' + lastCheckMs + '&limit=50'));
+                    const res = await fetch(apiUrl('/api/donations?profile_id=' + encodeURIComponent(profileId) + '&since_ms=' + lastCheckMs + '&status=confirmed&limit=50'));
                     const rows = await res.json();
                     if (!res.ok || !Array.isArray(rows) || !rows.length) return;
                     rows.forEach((donation) => addDonation(donation));
@@ -434,6 +434,7 @@
         }
 
         function addDonation(donation) {
+            if (!donation || donation.status !== 'confirmed') return;
             if (donation.id && seenDonationIds.has(donation.id)) return;
             if (donation.id) seenDonationIds.add(donation.id);
             pendingDonations.push(donation);
@@ -564,6 +565,7 @@
             ];
             
             const testDonation = {
+                status: 'confirmed',
                 donor_name: testNames[Math.floor(Math.random() * testNames.length)],
                 amount: Math.floor(Math.random() * 2000) + 10,
                 message: testMessages[Math.floor(Math.random() * testMessages.length)]
