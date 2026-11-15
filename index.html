@@ -34,18 +34,19 @@
 
     <h2 data-i18n="home.how">Как это работает</h2>
     <ul>
-        <li data-i18n="home.step1">Стример регистрируется и загружает QR-код СБП</li>
-        <li data-i18n="home.step2">Стример получает ссылку для донатов</li>
-        <li data-i18n="home.step3">Зритель переходит по ссылке, сканирует QR и переводит деньги</li>
-        <li data-i18n="home.step4">Зритель уведомляет стримера через форму</li>
-        <li data-i18n="home.step5">Стример видит донаты в панели управления</li>
+        <li data-i18n="home.step1">Стример регистрируется, загружает QR СБП и копирует ссылку для зрителей</li>
+        <li data-i18n="home.step2">В панели собирает OBS-оверлей: шрифт, цвет, время показа, озвучка</li>
+        <li data-i18n="home.step3">Зритель открывает ссылку, сканирует QR и переводит деньги (или платит СБП через ЮKassa, если у стримера включён режим самозанятого)</li>
+        <li data-i18n="home.step4">Донат попадает в панель. По умолчанию стример подтверждает его вручную</li>
+        <li data-i18n="home.step5">После подтверждения оверлей показывает текст и один раз озвучивает донат</li>
     </ul>
 
-    <h2 data-i18n="home.status">Статус</h2>
-    <div class="status status-done" data-i18n="home.status.api">Свой сервер и база данных работают</div>
-    <div class="status status-done" data-i18n="home.status.auth">Регистрация и вход</div>
-    <div class="status status-done" data-i18n="home.status.site">Сайт снова открывается с этой страницы, не из /docs</div>
-    <div class="status status-dev" data-i18n="home.status.obs">OBS-оверлей — следующий шаг</div>
+    <h2 data-i18n="home.status">Что уже работает</h2>
+    <div class="status status-done" data-i18n="home.status.api">Свой сервер FastAPI, PostgreSQL и сайт на api.sbpdonation.ru</div>
+    <div class="status status-done" data-i18n="home.status.auth">Регистрация, вход и панель стримера</div>
+    <div class="status status-done" data-i18n="home.status.site">Страница доната: QR, сообщение до 200 символов, выбор голоса</div>
+    <div class="status status-done" data-i18n="home.status.obs">OBS-оверлей: пауза, свой звук, Piper TTS, только подтверждённые донаты</div>
+    <div class="status status-done" data-i18n="home.status.self">Самозанятый (по желанию): ЮKassa СБП, автоподтверждение и чек «Прочие услуги» в «Мой налог»</div>
 
     <script src="js/i18n.js"></script>
 </body>

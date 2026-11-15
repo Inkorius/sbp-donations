@@ -396,8 +396,9 @@ app.add_middleware(
 @app.middleware("http")
 async def autoplay_headers(request: Request, call_next):
     response = await call_next(request)
-    response.headers["Permissions-Policy"] = "autoplay=*"
-    response.headers["Feature-Policy"] = 'autoplay *'
+    path = request.url.path
+    if path.endswith("obs-overlay.html") or path.startswith("/api/tts"):
+        response.headers["Permissions-Policy"] = "autoplay=*"
     return response
 
 

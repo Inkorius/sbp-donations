@@ -187,9 +187,7 @@
 <body>
     <!-- Контейнер для донатов -->
     <div id="donations-container"></div>
-    <audio id="alert-player" preload="auto" playsinline></audio>
-    <audio id="voice-player" preload="auto" playsinline></audio>
-    <audio id="unlock-player" preload="auto" playsinline autoplay muted loop></audio>
+    <audio id="unlock-player" preload="none" playsinline muted loop></audio>
 
     <!-- Статус подключения -->
     <div class="connection-status" id="connection-status">
@@ -240,6 +238,7 @@
         const pendingDonations = [];
         let overlayBusy = false;
         let sharedAudioCtx = null;
+        let activeSound = null;
 
         function apiUrl(path) {
             return path;
@@ -313,7 +312,7 @@
             socket.onmessage = (event) => {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'ping') return;
-                if ((msg.type === 'donation.confirmed' || msg.type === 'donation.new') && msg.data) addDonation(msg.data);
+                if (msg.type === 'donation.confirmed' && msg.data) addDonation(msg.data);
             };
             socket.onclose = () => {
                 if (connectionMode === 'realtime') {
@@ -399,44 +398,52 @@
             return ((donation.donor_name || 'Кто-то') + ' задонатил ' + amount + ' рублей' + message).slice(0, 500);
         }
 
-        function playThroughElement(player, src, maxMs) {
+        function stopAllOverlayAudio() {
+            if (activeSound) {
+                try {
+                    activeSound.pause();
+                    activeSound.removeAttribute('src');
+                    activeSound.load();
+                } catch (err) {}
+                activeSound = null;
+            }
+        }
+
+        function playOnce(url, maxMs) {
             return new Promise((resolve) => {
-                if (!player || !src) {
+                if (!url) {
                     resolve();
                     return;
                 }
+                stopAllOverlayAudio();
+                const audio = new Audio();
+                activeSound = audio;
+                audio.preload = 'none';
+                audio.muted = false;
+                audio.volume = 1;
                 let finished = false;
                 const finish = () => {
                     if (finished) return;
                     finished = true;
-                    player.onended = null;
-                    player.onerror = null;
+                    if (activeSound === audio) activeSound = null;
+                    try { audio.pause(); } catch (err) {}
                     resolve();
                 };
-                player.pause();
-                player.muted = false;
-                player.volume = 1;
-                player.src = src;
-                player.onended = finish;
-                player.onerror = finish;
-                player.play().catch(() => {
-                    setTimeout(() => player.play().catch(finish), 300);
-                });
-                setTimeout(finish, maxMs || 20000);
+                audio.addEventListener('ended', finish, { once: true });
+                audio.addEventListener('error', finish, { once: true });
+                audio.src = url;
+                audio.play().catch(finish);
+                setTimeout(finish, maxMs || 25000);
             });
-        }
-
-        async function playAudio(src, player) {
-            if (!src) return;
-            await unlockAudio();
-            const el = player || document.getElementById('voice-player');
-            await playThroughElement(el, src, player && player.id === 'alert-player' ? 8000 : 20000);
         }
 
         function addDonation(donation) {
             if (!donation || donation.status !== 'confirmed') return;
-            if (donation.id && seenDonationIds.has(donation.id)) return;
-            if (donation.id) seenDonationIds.add(donation.id);
+            const id = donation.id ? String(donation.id) : '';
+            if (id) {
+                if (seenDonationIds.has(id)) return;
+                seenDonationIds.add(id);
+            }
             pendingDonations.push(donation);
             processOverlayQueue();
         }
@@ -446,25 +453,18 @@
             overlayBusy = true;
             while (pendingDonations.length) {
                 const donation = pendingDonations.shift();
-                const ttsUrl = config.tts
-                    ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)) + '&voice=' + encodeURIComponent(donation.tts_voice || 'irina'))
-                    : null;
-                const voicePlayer = document.getElementById('voice-player');
-                const alertPlayer = document.getElementById('alert-player');
-                if (voicePlayer) {
-                    voicePlayer.pause();
-                    voicePlayer.removeAttribute('src');
-                }
+                stopAllOverlayAudio();
                 await sleep(5000);
                 if (alertSoundUrl) {
-                    await playAudio(alertSoundUrl, alertPlayer);
+                    await unlockAudio();
+                    await playOnce(alertSoundUrl, 8000);
                 }
-                await presentDonation(donation, ttsUrl);
+                await presentDonation(donation);
             }
             overlayBusy = false;
         }
 
-        async function presentDonation(donation, ttsUrl) {
+        async function presentDonation(donation) {
             donationsCount++;
             document.getElementById('counter').textContent = donationsCount;
 
@@ -491,8 +491,12 @@
             }
 
             donationEl.style.animation = `${config.animation} ${config.duration}ms forwards`;
+            const ttsUrl = config.tts
+                ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)) + '&voice=' + encodeURIComponent(donation.tts_voice || 'irina'))
+                : null;
+            await unlockAudio();
             await Promise.all([
-                ttsUrl ? playAudio(ttsUrl, document.getElementById('voice-player')) : Promise.resolve(),
+                ttsUrl ? playOnce(ttsUrl, 30000) : Promise.resolve(),
                 sleep(config.duration),
             ]);
 
