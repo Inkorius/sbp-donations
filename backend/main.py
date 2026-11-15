@@ -1,11 +1,13 @@
 import asyncio
 import hashlib
 import hmac
+import io
 import logging
 import os
 import re
 import secrets
-import tempfile
+import threading
+import wave
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -65,7 +67,14 @@ JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALG = "HS256"
 JWT_EXPIRE_HOURS = 72
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
+PIPER_DIR = Path(os.getenv("PIPER_DIR", str(UPLOAD_DIR / "piper")))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", str(Path(__file__).resolve().parent / "static")))
+TTS_VOICE_MODELS = {
+    "irina": "ru_RU-irina-medium",
+    "denis": "ru_RU-denis-medium",
+}
+_piper_voices: dict[str, object] = {}
+_piper_thread_lock = threading.Lock()
 _DSN_SSL_KEYS = {"ssl", "sslmode"}
 _USERNAME_RE = re.compile(r"[^a-z0-9_]+")
 
@@ -253,6 +262,7 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS payment_source TEXT NOT NULL DEFAULT 'manual'",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS matched_at TIMESTAMPTZ",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS tts_voice TEXT",
     """
     CREATE INDEX IF NOT EXISTS idx_donations_profile_created
       ON donations (profile_id, created_at DESC)
@@ -308,14 +318,16 @@ async def lifespan(_app: FastAPI):
         raise RuntimeError("JWT_SECRET is required")
     try:
         UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        PIPER_DIR.mkdir(parents=True, exist_ok=True)
     except OSError:
-        logging.warning("UPLOAD_DIR is not writable: %s", UPLOAD_DIR)
+        logging.warning("Upload/Piper dirs are not writable: %s %s", UPLOAD_DIR, PIPER_DIR)
     dsn, ssl = parse_database_url()
     pool_kwargs: dict = {"dsn": dsn, "min_size": 1, "max_size": 10}
     if ssl is not None:
         pool_kwargs["ssl"] = ssl
     pool = await asyncpg.create_pool(**pool_kwargs)
     await init_schema(pool)
+    asyncio.create_task(warmup_piper_voices())
     try:
         yield
     finally:
@@ -342,6 +354,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def autoplay_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Permissions-Policy"] = "autoplay=*"
+    response.headers["Feature-Policy"] = 'autoplay *'
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -408,6 +428,7 @@ class DonationCreate(BaseModel):
     donor_name: str = Field(min_length=1, max_length=100)
     amount: Decimal = Field(gt=0)
     message: Optional[str] = Field(default=None, max_length=500)
+    tts_voice: Optional[str] = Field(default="irina", max_length=40)
 
 
 class DonationOut(BaseModel):
@@ -417,6 +438,7 @@ class DonationOut(BaseModel):
     amount: Decimal
     message: Optional[str]
     status: str
+    tts_voice: Optional[str] = None
     created_at: datetime
 
 
@@ -440,6 +462,7 @@ def row_to_profile(row: asyncpg.Record) -> ProfileOut:
 
 
 def row_to_donation(row: asyncpg.Record) -> DonationOut:
+    keys = set(row.keys())
     return DonationOut(
         id=row["id"],
         profile_id=row["profile_id"],
@@ -447,8 +470,72 @@ def row_to_donation(row: asyncpg.Record) -> DonationOut:
         amount=row["amount"],
         message=row["message"],
         status=row["status"],
+        tts_voice=row["tts_voice"] if "tts_voice" in keys else None,
         created_at=row["created_at"],
     )
+
+
+def resolve_tts_voice(name: Optional[str]) -> str:
+    raw = (name or "irina").strip().lower()
+    if raw in TTS_VOICE_MODELS:
+        return raw
+    for key, model_id in TTS_VOICE_MODELS.items():
+        if raw == model_id.lower() or raw.replace("-", "_").endswith(key):
+            return key
+    return "irina"
+
+
+def download_piper_model(model_id: str) -> Path:
+    PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    onnx = PIPER_DIR / f"{model_id}.onnx"
+    cfg = PIPER_DIR / f"{model_id}.onnx.json"
+    if onnx.is_file() and onnx.stat().st_size > 1000 and cfg.is_file() and cfg.stat().st_size > 10:
+        return onnx
+    from piper.download_voices import download_voice
+
+    logging.info("Downloading Piper voice %s into %s", model_id, PIPER_DIR)
+    download_voice(model_id, PIPER_DIR)
+    if not onnx.is_file():
+        raise RuntimeError(f"Piper model missing after download: {onnx}")
+    return onnx
+
+
+def load_piper_voice(key: str):
+    with _piper_thread_lock:
+        cached = _piper_voices.get(key)
+        if cached is not None:
+            return cached
+        from piper import PiperVoice
+
+        model_id = TTS_VOICE_MODELS[key]
+        path = download_piper_model(model_id)
+        voice = PiperVoice.load(str(path))
+        _piper_voices[key] = voice
+        logging.info("Loaded Piper voice %s", model_id)
+        return voice
+
+
+def piper_wav_bytes(key: str, text: str) -> bytes:
+    voice = load_piper_voice(key)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        voice.synthesize_wav(text, wav_file)
+    payload = buf.getvalue()
+    if len(payload) < 44:
+        raise RuntimeError("empty piper wav")
+    return payload
+
+
+async def warmup_piper_voices() -> None:
+    for key in TTS_VOICE_MODELS:
+        try:
+            await asyncio.to_thread(load_piper_voice, key)
+        except Exception:
+            logging.exception("Could not prepare Piper voice %s", key)
+
+
+async def synthesize_speech(text: str, voice_key: str) -> bytes:
+    return await asyncio.to_thread(piper_wav_bytes, voice_key, text)
 
 
 async def current_user(
@@ -732,42 +819,17 @@ async def upload_alert_sound(
     return row_to_profile(row)
 
 
-async def synthesize_speech(text: str) -> bytes:
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    path = tmp.name
-    tmp.close()
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "espeak-ng",
-            "-v",
-            "ru",
-            "-s",
-            "130",
-            "-w",
-            path,
-            "--stdin",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _stdout, stderr = await asyncio.wait_for(proc.communicate(text.encode("utf-8")), timeout=15)
-        if proc.returncode != 0:
-            raise RuntimeError(stderr.decode("utf-8", errors="replace") or "espeak-ng failed")
-        data = Path(path).read_bytes()
-        if len(data) < 44:
-            raise RuntimeError("empty wav")
-        return data
-    finally:
-        Path(path).unlink(missing_ok=True)
-
-
 @app.get("/api/tts", summary="Озвучка доната")
-async def overlay_tts(request: Request, text: str = Query(..., min_length=1, max_length=500)):
+async def overlay_tts(
+    request: Request,
+    text: str = Query(..., min_length=1, max_length=500),
+    voice: str = Query(default="irina", max_length=40),
+):
     clean = re.sub(r"\s+", " ", text).strip()
     if not clean:
         raise HTTPException(status_code=400, detail=msg(request, "tts_fail"))
     try:
-        payload = await synthesize_speech(clean)
+        payload = await synthesize_speech(clean, resolve_tts_voice(voice))
     except Exception as exc:
         logging.exception("TTS failed")
         raise HTTPException(status_code=502, detail=msg(request, "tts_fail")) from exc
@@ -804,14 +866,15 @@ async def create_donation(request: Request, body: DonationCreate) -> DonationOut
 
     row = await pool.fetchrow(
         """
-        INSERT INTO donations (profile_id, donor_name, amount, message, status)
-        VALUES ($1, $2, $3, $4, 'pending')
-        RETURNING id, profile_id, donor_name, amount, message, status, created_at
+        INSERT INTO donations (profile_id, donor_name, amount, message, status, tts_voice)
+        VALUES ($1, $2, $3, $4, 'pending', $5)
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, created_at
         """,
         body.profile_id,
         body.donor_name.strip(),
         body.amount,
         (body.message or "").strip() or None,
+        resolve_tts_voice(body.tts_voice),
     )
     donation = row_to_donation(row)
     await hub.broadcast(
@@ -852,7 +915,7 @@ async def list_donations(
     if cutoff:
         rows = await pool.fetch(
             """
-            SELECT id, profile_id, donor_name, amount, message, status, created_at
+            SELECT id, profile_id, donor_name, amount, message, status, tts_voice, created_at
             FROM donations
             WHERE profile_id = $1 AND created_at > $2
             ORDER BY created_at ASC
@@ -865,7 +928,7 @@ async def list_donations(
     else:
         rows = await pool.fetch(
             """
-            SELECT id, profile_id, donor_name, amount, message, status, created_at
+            SELECT id, profile_id, donor_name, amount, message, status, tts_voice, created_at
             FROM donations
             WHERE profile_id = $1
             ORDER BY created_at DESC
@@ -903,7 +966,7 @@ async def update_donation(
         UPDATE donations
         SET status = $3, confirmed_at = COALESCE($4, confirmed_at)
         WHERE id = $1 AND profile_id = $2
-        RETURNING id, profile_id, donor_name, amount, message, status, created_at
+        RETURNING id, profile_id, donor_name, amount, message, status, tts_voice, created_at
         """,
         donation_id,
         user["id"],

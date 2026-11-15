@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OBS Overlay - SBP Donations</title>
+    <meta http-equiv="Permissions-Policy" content="autoplay=*">
     <style>
         * {
             margin: 0;
@@ -186,8 +187,9 @@
 <body>
     <!-- Контейнер для донатов -->
     <div id="donations-container"></div>
-    <audio id="alert-player" preload="auto" playsinline></audio>
-    <audio id="voice-player" preload="auto" playsinline></audio>
+    <audio id="alert-player" preload="auto" playsinline autoplay></audio>
+    <audio id="voice-player" preload="auto" playsinline autoplay></audio>
+    <audio id="unlock-player" preload="auto" playsinline autoplay muted loop></audio>
 
     <!-- Статус подключения -->
     <div class="connection-status" id="connection-status">
@@ -257,6 +259,7 @@
                 document.head.appendChild(fontLink);
             }
             unlockAudio();
+            armAutoplay();
             updateStatus('Поиск стримера...');
             if (config.debug) {
                 document.body.classList.add('debug');
@@ -345,18 +348,49 @@
             return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
+        const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
         async function unlockAudio() {
             const Ctx = window.AudioContext || window.webkitAudioContext;
-            if (!Ctx) return;
-            if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
-            if (sharedAudioCtx.state === 'suspended') {
-                try { await sharedAudioCtx.resume(); } catch (err) {}
+            if (Ctx) {
+                if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
+                if (sharedAudioCtx.state === 'suspended') {
+                    try { await sharedAudioCtx.resume(); } catch (err) {}
+                }
+                try {
+                    const buffer = sharedAudioCtx.createBuffer(1, 1, 22050);
+                    const node = sharedAudioCtx.createBufferSource();
+                    node.buffer = buffer;
+                    node.connect(sharedAudioCtx.destination);
+                    node.start();
+                } catch (err) {}
             }
-            const buffer = sharedAudioCtx.createBuffer(1, 1, 22050);
-            const node = sharedAudioCtx.createBufferSource();
-            node.buffer = buffer;
-            node.connect(sharedAudioCtx.destination);
-            try { node.start(); } catch (err) {}
+            const unlockPlayer = document.getElementById('unlock-player');
+            if (unlockPlayer && !unlockPlayer.src) {
+                unlockPlayer.src = SILENT_WAV;
+            }
+            if (unlockPlayer) {
+                unlockPlayer.muted = true;
+                unlockPlayer.play().catch(() => {});
+            }
+        }
+
+        function armAutoplay() {
+            const retry = () => unlockAudio();
+            ['pointerdown', 'mousedown', 'keydown', 'touchstart', 'click'].forEach((name) => {
+                document.addEventListener(name, retry, true);
+            });
+            document.addEventListener('visibilitychange', retry);
+            window.addEventListener('focus', retry);
+            window.addEventListener('obsSourceVisibleChanged', retry);
+            window.addEventListener('obsSourceActiveChanged', retry);
+            window.addEventListener('obsSceneChanged', retry);
+            if (window.obsstudio && typeof window.obsstudio.onVisibilityChange === 'function') {
+                window.obsstudio.onVisibilityChange(retry);
+            }
+            setInterval(() => {
+                if (sharedAudioCtx && sharedAudioCtx.state === 'suspended') unlockAudio();
+            }, 2000);
         }
 
         function donationSpeechText(donation) {
@@ -412,7 +446,7 @@
             while (pendingDonations.length) {
                 const donation = pendingDonations.shift();
                 const ttsUrl = config.tts
-                    ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)))
+                    ? apiUrl('/api/tts?text=' + encodeURIComponent(donationSpeechText(donation)) + '&voice=' + encodeURIComponent(donation.tts_voice || 'irina'))
                     : null;
                 const waitAndPrepare = [sleep(5000)];
                 if (ttsUrl) {

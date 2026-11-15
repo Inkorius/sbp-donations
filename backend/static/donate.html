@@ -157,6 +157,7 @@
         }
 
         .form-group input,
+        .form-group select,
         .form-group textarea {
             width: 100%;
             padding: 14px;
@@ -168,6 +169,7 @@
         }
 
         .form-group input:focus,
+        .form-group select:focus,
         .form-group textarea:focus {
             border-color: #7c4dff;
             outline: none;
@@ -407,6 +409,13 @@
                         <label for="message" data-i18n="donate.message">Сообщение для стримера</label>
                         <textarea id="message" data-i18n-placeholder="donate.messagePh" placeholder="Напишите что-нибудь приятное..."></textarea>
                     </div>
+                    <div class="form-group">
+                        <label for="tts-voice" data-i18n="donate.voice">Голос озвучки</label>
+                        <select id="tts-voice">
+                            <option value="irina" data-i18n="donate.voice.irina">Ирина</option>
+                            <option value="denis" data-i18n="donate.voice.denis">Денис</option>
+                        </select>
+                    </div>
                     
                     <button type="submit" class="submit-btn">
                         📢 <span data-i18n="donate.submit">Уведомить стримера о переводе</span>
@@ -551,6 +560,7 @@
                 const donorName = document.getElementById('donor-name').value.trim();
                 const amount = parseFloat(document.getElementById('amount').value);
                 const message = document.getElementById('message').value.trim();
+                const ttsVoice = document.getElementById('tts-voice').value;
                 
                 if (!donorName || !amount || amount < 10) {
                     showMessage(t('donate.badAmount'), 'error');
@@ -572,7 +582,8 @@
                             profile_id: profileId,
                             donor_name: donorName,
                             amount: amount,
-                            message: message || null
+                            message: message || null,
+                            tts_voice: ttsVoice || 'irina'
                         })
                     });
                     
