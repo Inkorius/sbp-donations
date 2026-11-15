@@ -277,6 +277,23 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS yookassa_payment_id TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_shop_id TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_secret_key TEXT",
+    "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS self_employed BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_uuid TEXT",
+    "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_url TEXT",
+    """
+    CREATE TABLE IF NOT EXISTS receipts_queue (
+      id            UUID PRIMARY KEY,
+      donation_id   UUID NOT NULL REFERENCES donations(id) ON DELETE CASCADE,
+      amount        NUMERIC(12, 2) NOT NULL,
+      service_name  TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      attempts      INTEGER NOT NULL DEFAULT 0,
+      last_error    TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_receipts_queue_status ON receipts_queue (status, created_at)",
     """
     CREATE INDEX IF NOT EXISTS idx_donations_profile_created
       ON donations (profile_id, created_at DESC)
@@ -342,6 +359,9 @@ async def lifespan(_app: FastAPI):
     pool = await asyncpg.create_pool(**pool_kwargs)
     await init_schema(pool)
     asyncio.create_task(warmup_piper_voices())
+    from nalog_service import receipts_retry_loop
+
+    asyncio.create_task(receipts_retry_loop(pool))
     try:
         yield
     finally:
@@ -428,6 +448,7 @@ class ProfileOut(BaseModel):
     alert_sound_url: Optional[str] = None
     yookassa_enabled: bool = False
     yookassa_shop_id: Optional[str] = None
+    self_employed: bool = False
     created_at: datetime
 
 
@@ -440,6 +461,7 @@ class ProfileUpdate(BaseModel):
     yookassa_shop_id: Optional[str] = Field(default=None, max_length=64)
     yookassa_secret_key: Optional[str] = Field(default=None, max_length=200)
     clear_yookassa: Optional[bool] = None
+    self_employed: Optional[bool] = None
 
 
 class DonationCreate(BaseModel):
@@ -478,6 +500,13 @@ def yookassa_env_ready() -> bool:
     return bool(YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
 
 
+def profile_self_employed(row: Optional[asyncpg.Record]) -> bool:
+    if not row:
+        return False
+    keys = set(row.keys())
+    return bool("self_employed" in keys and row["self_employed"])
+
+
 def profile_yookassa_auth(row: Optional[asyncpg.Record]) -> Optional[tuple[str, str]]:
     if row:
         keys = set(row.keys())
@@ -494,7 +523,8 @@ def row_to_profile(row: asyncpg.Record, *, public: bool = True) -> ProfileOut:
     keys = set(row.keys())
     shop = (row["yookassa_shop_id"] or "").strip() if "yookassa_shop_id" in keys and row["yookassa_shop_id"] else ""
     secret = (row["yookassa_secret_key"] or "").strip() if "yookassa_secret_key" in keys and row["yookassa_secret_key"] else ""
-    enabled = bool(shop and secret) or yookassa_env_ready()
+    self_employed = bool("self_employed" in keys and row["self_employed"])
+    has_keys = bool(shop and secret) or yookassa_env_ready()
     return ProfileOut(
         id=row["id"],
         username=row["username"],
@@ -504,8 +534,9 @@ def row_to_profile(row: asyncpg.Record, *, public: bool = True) -> ProfileOut:
         avatar_url=row["avatar_url"],
         avatar_color=row["avatar_color"] if "avatar_color" in keys else None,
         alert_sound_url=row["alert_sound_url"] if "alert_sound_url" in keys else None,
-        yookassa_enabled=enabled,
+        yookassa_enabled=self_employed and has_keys,
         yookassa_shop_id=None if public else (shop or None),
+        self_employed=self_employed,
         created_at=row["created_at"],
     )
 
@@ -791,6 +822,7 @@ async def update_my_profile(
             alert_sound_url = CASE WHEN $6 THEN NULL ELSE alert_sound_url END,
             yookassa_shop_id = CASE WHEN $7 THEN NULL ELSE COALESCE($8, yookassa_shop_id) END,
             yookassa_secret_key = CASE WHEN $7 THEN NULL ELSE COALESCE($9, yookassa_secret_key) END,
+            self_employed = COALESCE($10, self_employed),
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
@@ -804,6 +836,7 @@ async def update_my_profile(
         bool(body.clear_yookassa),
         shop,
         secret,
+        body.self_employed,
     )
     if not row:
         raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
@@ -987,6 +1020,8 @@ async def create_yookassa_payment(request: Request, donation_id: UUID) -> Yookas
     if donation_row["status"] == "rejected":
         raise HTTPException(status_code=409, detail=msg(request, "yookassa_fail"))
     profile = await pool.fetchrow("SELECT * FROM profiles WHERE id = $1", donation_row["profile_id"])
+    if not profile_self_employed(profile):
+        raise HTTPException(status_code=400, detail=msg(request, "yookassa_off"))
     auth = profile_yookassa_auth(profile)
     if not auth:
         raise HTTPException(status_code=400, detail=msg(request, "yookassa_off"))
@@ -1074,6 +1109,8 @@ async def yookassa_webhook(request: Request):
         logging.warning("YooKassa webhook for unknown donation payment %s", payment_id)
         return JSONResponse({"ok": True, "unknown": True})
     profile = await pool.fetchrow("SELECT * FROM profiles WHERE id = $1", donation_row["profile_id"])
+    if not profile_self_employed(profile):
+        return JSONResponse({"ok": True, "ignored": True})
     auth = profile_yookassa_auth(profile)
     if not auth:
         raise HTTPException(status_code=502, detail=msg(request, "yookassa_off"))
@@ -1104,7 +1141,14 @@ async def yookassa_webhook(request: Request):
             donation_row["amount"],
         )
         return JSONResponse({"ok": True, "mismatch": True})
-    await mark_donation_confirmed(donation_row["id"], payment_id)
+    donation = await mark_donation_confirmed(donation_row["id"], payment_id)
+    if donation:
+        try:
+            from nalog_service import enqueue_receipt
+
+            await enqueue_receipt(pool, donation.id, Decimal(donation.amount))
+        except Exception:
+            logging.exception("Could not enqueue Мой Налог receipt")
     return JSONResponse({"ok": True})
 
 

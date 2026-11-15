@@ -169,17 +169,22 @@
     </div>
 
     <div class="section" id="yookassa-section">
-        <h2 data-i18n="dash.yookassa">ЮKassa (СБП)</h2>
-        <p data-i18n="dash.yookassa.hint">Свой магазин ЮKassa: зритель сможет оплатить кнопкой, донат подтвердится сам. В кабинете ЮKassa укажите HTTP-уведомления: https://api.sbpdonation.ru/api/yookassa/webhook (событие payment.succeeded). Без ключей останется ручной QR и кнопка «Подтвердить».</p>
-        <div class="look-grid">
-            <label for="yookassa-shop-id" data-i18n="dash.yookassa.shop">Shop ID</label>
-            <input type="text" id="yookassa-shop-id" autocomplete="off">
-            <label for="yookassa-secret" data-i18n="dash.yookassa.secret">Секретный ключ</label>
-            <input type="password" id="yookassa-secret" autocomplete="off" placeholder="••••••••">
+        <h2 data-i18n="dash.selfEmployed">Самозанятый</h2>
+        <p data-i18n="dash.selfEmployed.hint">Если выключено — только ручной QR и подтверждение в панели. Если включено — ЮKassa сама подтвердит оплату и отправит чек в «Мой налог».</p>
+        <button type="button" id="self-employed-btn" class="toggle-btn">Самозанятый: выкл</button>
+        <div id="yookassa-fields" style="display: none; margin-top: 16px;">
+            <h3 data-i18n="dash.yookassa">ЮKassa (СБП)</h3>
+            <p data-i18n="dash.yookassa.hint">Свой магазин ЮKassa: зритель сможет оплатить кнопкой, донат подтвердится сам. В кабинете ЮKassa укажите HTTP-уведомления: https://api.sbpdonation.ru/api/yookassa/webhook (событие payment.succeeded).</p>
+            <div class="look-grid">
+                <label for="yookassa-shop-id" data-i18n="dash.yookassa.shop">Shop ID</label>
+                <input type="text" id="yookassa-shop-id" autocomplete="off">
+                <label for="yookassa-secret" data-i18n="dash.yookassa.secret">Секретный ключ</label>
+                <input type="password" id="yookassa-secret" autocomplete="off" placeholder="••••••••">
+            </div>
+            <button type="button" id="save-yookassa-btn" data-i18n="dash.yookassa.save">Сохранить ЮKassa</button>
+            <button type="button" id="clear-yookassa-btn" data-i18n="dash.yookassa.clear">Отключить ЮKassa</button>
+            <div id="yookassa-status" style="margin-top: 10px;"></div>
         </div>
-        <button type="button" id="save-yookassa-btn" data-i18n="dash.yookassa.save">Сохранить ЮKassa</button>
-        <button type="button" id="clear-yookassa-btn" data-i18n="dash.yookassa.clear">Отключить ЮKassa</button>
-        <div id="yookassa-status" style="margin-top: 10px;"></div>
     </div>
 
     <div class="section">
@@ -309,6 +314,8 @@
             const yookassaStatusEl = document.getElementById('yookassa-status')
             const saveYookassaBtn = document.getElementById('save-yookassa-btn')
             const clearYookassaBtn = document.getElementById('clear-yookassa-btn')
+            const selfEmployedBtn = document.getElementById('self-employed-btn')
+            const yookassaFieldsEl = document.getElementById('yookassa-fields')
             const obsSettings = {
                 tts: localStorage.getItem('sbp_obs_tts') === '1',
                 debug: localStorage.getItem('sbp_obs_debug') === '1',
@@ -403,6 +410,7 @@
             obsSoundClearBtn.addEventListener('click', clearAlertSound)
             saveYookassaBtn.addEventListener('click', saveYookassa)
             clearYookassaBtn.addEventListener('click', clearYookassa)
+            selfEmployedBtn.addEventListener('click', toggleSelfEmployed)
             confirmAllBtn.addEventListener('click', confirmAllPending)
             saveLookBtn.addEventListener('click', saveLook)
             uploadAvatarBtn.addEventListener('click', uploadAvatar)
@@ -894,6 +902,10 @@
             // Копирование ссылки
             function paintYookassa(profile) {
                 const t = window.sbpI18n.t
+                const on = !!(profile && profile.self_employed)
+                selfEmployedBtn.textContent = t('dash.selfEmployed') + ': ' + t(on ? 'dash.obs.on' : 'dash.obs.off')
+                selfEmployedBtn.classList.toggle('on', on)
+                yookassaFieldsEl.style.display = on ? 'block' : 'none'
                 yookassaShopEl.value = (profile && profile.yookassa_shop_id) || ''
                 yookassaSecretEl.value = ''
                 if (profile && profile.yookassa_enabled) {
@@ -902,6 +914,20 @@
                 } else {
                     yookassaStatusEl.textContent = t('dash.yookassa.off')
                     yookassaStatusEl.style.color = '#666'
+                }
+            }
+
+            async function toggleSelfEmployed() {
+                const next = !(currentProfile && currentProfile.self_employed)
+                try {
+                    const updated = await window.sbpApi.request('/api/profiles/me', {
+                        method: 'PATCH',
+                        body: JSON.stringify({ self_employed: next }),
+                    })
+                    currentProfile = updated
+                    paintYookassa(updated)
+                } catch (error) {
+                    alert(error.message)
                 }
             }
 
