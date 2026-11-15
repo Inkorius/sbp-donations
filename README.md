@@ -1,14 +1,14 @@
 ﻿# SBP Donations — прямые донаты через СБП для стримеров
 
-Открытое веб-приложение: зритель переводит стримеру по СБП, стример видит донат в панели, OBS-оверлей показывает и озвучивает только **подтверждённые** донаты.
+Open-source инструмент для **самостоятельного развёртывания**. Зритель переводит стримеру по СБП, стример видит донат в панели, OBS-оверлей показывает и озвучивает только **подтверждённые** донаты.
 
-Работает на своём сервере: **FastAPI + PostgreSQL**, сайт и API — [https://sbpdonation.ru](https://sbpdonation.ru).
+Публичный хостинг это не коммерческий сервис. Сайт [https://sbpdonation.ru](https://sbpdonation.ru) — только демо. Аккаунты сам себе создать нельзя.
 
 ## Возможности
 
 **Для стримеров**
 
-- Регистрация и вход (JWT).
+- Вход по аккаунту, который выдаёт администратор (JWT).
 - Загрузка QR СБП, аватар, имя и описание страницы доната.
 - Ссылка для зрителей вида `/donate.html?user=логин`.
 - Список донатов, статистика, ручное подтверждение и отклонение.
@@ -29,35 +29,38 @@
 
 ## Ссылки
 
-- Сайт: https://sbpdonation.ru/
+- Демо: https://sbpdonation.ru/
 - Репозиторий: https://github.com/Inkorius/sbp-donations
 
 ## Стек
 
 - HTML, CSS, JavaScript без фреймворков.
 - FastAPI, uvicorn, asyncpg, PyJWT, httpx.
-- PostgreSQL (отдельная база, не Immich).
+- PostgreSQL.
 - Piper TTS, опционально ЮKassa API и nalogovich («Мой налог»).
 - Docker + EasyPanel (Traefik, HTTPS).
 
-## Быстрый старт для стримера
+## Демо-версия
 
-1. Откройте https://sbpdonation.ru/ и зарегистрируйтесь.
-2. Загрузите QR СБП, сохраните имя на странице.
-3. Скопируйте ссылку для зрителей.
-4. В блоке OBS соберите URL оверлея и вставьте в OBS (в источнике включите звук).
-5. Подтверждайте донаты в панели — тогда они появятся в эфире.
-6. Режим самозанятого включайте только если нужны ЮKassa и чеки.
+Это демо-сервер, а не коммерческий хостинг. Он работает на домашнем оборудовании без RAID-массива и может быть недоступен. Я не гарантирую сохранность данных и стабильную работу 24/7. Если вы хотите использовать проект для реальных донатов, разверните свою копию (см. ниже).
+
+Публичная регистрация закрыта. Если вы хотите получить аккаунт на демо-сервере для теста, напишите мне на email: morfsuR@yandex.ru или в Issues, и я создам его вручную.
 
 ## Развёртывание своей копии
 
-Нужны Docker (или EasyPanel), PostgreSQL и домен с HTTPS.
+Это основной способ пользоваться проектом. Нужны Docker (или EasyPanel), PostgreSQL и домен с HTTPS.
 
-1. Клонируйте репозиторий.
-2. Задайте переменные окружения (см. `deploy/.env.example`): `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGINS`, `HTTP_PORT`.
-3. Соберите контейнер из `backend/Dockerfile` (контекст — корень репозитория или папка `backend`). QR и модели Piper лежат в томе, например `/mnt/data/sbp-donation/qr-codes` → `/app/uploads`.
-4. Опционально для самозанятых: `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` (или ключи в панели), `MOY_NALOG_INN`, `MOY_NALOG_PASSWORD`. В ЮKassa укажите webhook `https://ваш-домен/api/yookassa/webhook` (событие `payment.succeeded`).
-5. Сайт отдаётся из контейнера (`STATIC_DIR=/app/static`).
+1. Клонируйте репозиторий: `git clone https://github.com/Inkorius/sbp-donations.git`
+2. Задайте переменные окружения (см. `deploy/.env.example`):
+   - обязательно: `DATABASE_URL`, `JWT_SECRET`, `HTTP_PORT`;
+   - администратор: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (первый админ создаётся при старте);
+   - документация API: `DOCS_USER`, `DOCS_PASSWORD` (без них `/docs`, `/redoc` и `/openapi.json` отдают 404).
+3. Соберите контейнер из `backend/Dockerfile` (контекст — корень репозитория или папка `backend`). QR и модели Piper положите в том, например `/mnt/data/sbp-donation/qr-codes` → `/app/uploads`.
+4. Откройте `/docs` (логин/пароль из `DOCS_USER` / `DOCS_PASSWORD`), выполните `POST /api/auth/login` под админом, нажмите **Authorize** и вставьте JWT. Пользователей создавайте через `POST /api/admin/users` (email, пароль, username).
+5. Опционально для самозанятых: `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY` (или ключи в панели), `MOY_NALOG_INN`, `MOY_NALOG_PASSWORD`. В ЮKassa укажите webhook `https://ваш-домен/api/yookassa/webhook` (событие `payment.succeeded`).
+6. Сайт отдаётся из контейнера (`STATIC_DIR=/app/static`).
+
+Публичный `POST /api/auth/register` закрыт (403). Новых стримеров добавляет только администратор.
 
 ## OBS
 
@@ -65,7 +68,7 @@
 
 | Параметр | Описание | Пример |
 |---|---|---|
-| `user` | Логин стримера (обязательно)
+| `user` | Логин стримера (обязательно) | `parfjek` |
 | `tts` | Озвучка Piper | `1` |
 | `font` / `size` / `color` | Шрифт, размер, цвет текста | `Arial`, `56`, `ffffff` |
 | `duration` | Время показа текста, мс | `10000` |
@@ -82,10 +85,10 @@ sbp-donations/
 │   ├── main.py
 │   ├── nalog_service.py
 │   ├── requirements.txt
-│   └── static/          # копия сайта внутри образа
+│   └── static/
 ├── deploy/.env.example
-├── js/                  # api-client.js, i18n.js
-├── index.html           # главная
+├── js/
+├── index.html
 ├── login.html
 ├── dashboard.html
 ├── donate.html
@@ -101,7 +104,7 @@ sbp-donations/
 
 ## Как помочь
 
-Issues, идеи и pull request'ы приветствуются. Делитесь проектом со стримерами.
+Issues, идеи и pull request'ы приветствуются. Для реальных стримов разворачивайте свою копию.
 
 ## Лицензия
 

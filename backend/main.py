@@ -24,9 +24,9 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBasic, HTTPBasicCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
 
@@ -71,6 +71,10 @@ YOOKASSA_RETURN_URL = os.getenv("YOOKASSA_RETURN_URL", "https://sbpdonation.ru/d
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 JWT_ALG = "HS256"
 JWT_EXPIRE_HOURS = 72
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "").strip().lower()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+DOCS_USER = os.getenv("DOCS_USER", "").strip()
+DOCS_PASSWORD = os.getenv("DOCS_PASSWORD", "").strip()
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads"))
 PIPER_DIR = Path(os.getenv("PIPER_DIR", str(UPLOAD_DIR / "piper")))
 STATIC_DIR = Path(os.getenv("STATIC_DIR", str(Path(__file__).resolve().parent / "static")))
@@ -103,6 +107,11 @@ TEXTS = {
         "yookassa_off": "ЮKassa не подключена",
         "yookassa_fail": "Не удалось создать платёж ЮKassa",
         "yookassa_paid": "Этот донат уже подтверждён",
+        "reg_disabled": "Public registration is disabled",
+        "admin_only": "Нужны права администратора",
+        "username_taken": "Это имя пользователя уже занято",
+        "bad_username": "Имя пользователя: латиница, цифры и _",
+        "admin_self": "Нельзя удалить свой аккаунт",
     },
     "en": {
         "email_taken": "This email is already registered",
@@ -123,6 +132,11 @@ TEXTS = {
         "yookassa_off": "YooKassa is not connected",
         "yookassa_fail": "Could not create a YooKassa payment",
         "yookassa_paid": "This donation is already confirmed",
+        "reg_disabled": "Public registration is disabled",
+        "admin_only": "Admin access required",
+        "username_taken": "This username is already taken",
+        "bad_username": "Username may contain only latin letters, digits, and _",
+        "admin_self": "You cannot delete your own account",
     },
 }
 
@@ -278,6 +292,7 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_shop_id TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS yookassa_secret_key TEXT",
     "ALTER TABLE profiles ADD COLUMN IF NOT EXISTS self_employed BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_uuid TEXT",
     "ALTER TABLE donations ADD COLUMN IF NOT EXISTS receipt_url TEXT",
     """
@@ -340,6 +355,7 @@ async def init_schema(db: asyncpg.Pool) -> None:
         for statement in SCHEMA_STATEMENTS:
             await conn.execute(statement)
     logging.info("Database schema is ready")
+    await bootstrap_admin(db)
 
 
 @asynccontextmanager
@@ -375,12 +391,13 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="SBP Donations",
     description=(
-        "Техническая документация API. Сайт для стримеров открывается с главной страницы `/`, "
-        "а не отсюда. Technical API docs. The streamer website is `/`, not this page."
+        "Self-hosted SBP donations. Public registration is disabled. "
+        "Create streamer accounts as admin via /api/admin/users."
     ),
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
+    openapi_url=None,
 )
 
 _cors_origins = [item.strip() for item in os.getenv("CORS_ORIGINS", "*").split(",") if item.strip()]
@@ -424,6 +441,24 @@ async def unhandled_handler(request: Request, exc: Exception):
 class AuthRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
+
+
+class AdminUserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+    username: str = Field(min_length=1, max_length=40)
+
+
+class AdminPasswordReset(BaseModel):
+    password: str = Field(min_length=6, max_length=128)
+
+
+class AdminUserOut(BaseModel):
+    id: UUID
+    email: str
+    username: Optional[str] = None
+    is_admin: bool = False
+    created_at: datetime
 
 
 class AuthResponse(BaseModel):
@@ -674,7 +709,7 @@ async def current_user(
 
     user = await pool.fetchrow(
         """
-        SELECT u.id, u.email, u.email_verified, u.created_at, p.username
+        SELECT u.id, u.email, u.email_verified, u.is_admin, u.created_at, p.username
         FROM users u
         LEFT JOIN profiles p ON p.id = u.id
         WHERE u.id = $1
@@ -686,6 +721,57 @@ async def current_user(
     return user
 
 
+def user_is_admin(row: Optional[asyncpg.Record]) -> bool:
+    if not row:
+        return False
+    keys = set(row.keys())
+    if "is_admin" in keys and row["is_admin"]:
+        return True
+    return bool(ADMIN_EMAIL and str(row["email"]).lower() == ADMIN_EMAIL)
+
+
+async def current_admin(
+    request: Request,
+    user: asyncpg.Record = Depends(current_user),
+) -> asyncpg.Record:
+    if not user_is_admin(user):
+        raise HTTPException(status_code=403, detail=msg(request, "admin_only"))
+    return user
+
+
+docs_basic = HTTPBasic(auto_error=False)
+optional_bearer = HTTPBearer(auto_error=False)
+
+
+def docs_enabled() -> bool:
+    return bool(DOCS_USER and DOCS_PASSWORD)
+
+
+def _basic_ok(got: str, expected: str) -> bool:
+    try:
+        return secrets.compare_digest(got.encode("utf-8"), expected.encode("utf-8"))
+    except Exception:
+        return False
+
+
+async def require_docs_auth(
+    creds: Optional[HTTPBasicCredentials] = Depends(docs_basic),
+) -> None:
+    if not docs_enabled():
+        raise HTTPException(status_code=404, detail="Not Found")
+    if creds is None or not (_basic_ok(creds.username, DOCS_USER) and _basic_ok(creds.password, DOCS_PASSWORD)):
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+def normalize_username(raw: str) -> str:
+    cleaned = _USERNAME_RE.sub("", (raw or "").lower()).strip("_")
+    return cleaned[:40]
+
+
 async def unique_username(conn: asyncpg.Connection, base: str) -> str:
     candidate = base
     suffix = 0
@@ -695,14 +781,99 @@ async def unique_username(conn: asyncpg.Connection, base: str) -> str:
     return candidate
 
 
+async def create_user_with_profile(
+    conn: asyncpg.Connection,
+    email: str,
+    password: str,
+    username: Optional[str] = None,
+    is_admin: bool = False,
+) -> tuple[asyncpg.Record, str]:
+    if username:
+        uname = normalize_username(username)
+        if not uname:
+            raise ValueError("bad_username")
+        taken = await conn.fetchval("SELECT 1 FROM profiles WHERE username = $1", uname)
+        if taken:
+            raise ValueError("username_taken")
+    else:
+        uname = await unique_username(conn, username_from_email(email))
+    user = await conn.fetchrow(
+        """
+        INSERT INTO users (email, password_hash, email_verified, is_admin)
+        VALUES ($1, $2, TRUE, $3)
+        RETURNING id, email, email_verified, is_admin, created_at
+        """,
+        email,
+        hash_password(password),
+        is_admin,
+    )
+    await conn.execute(
+        """
+        INSERT INTO profiles (id, username, display_name)
+        VALUES ($1, $2, $2)
+        """,
+        user["id"],
+        uname,
+    )
+    return user, uname
+
+
+async def bootstrap_admin(db: asyncpg.Pool) -> None:
+    if not ADMIN_EMAIL:
+        logging.warning("ADMIN_EMAIL is not set; no admin account will be bootstrapped")
+        return
+    async with db.acquire() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchrow("SELECT id, is_admin FROM users WHERE email = $1", ADMIN_EMAIL)
+            if existing:
+                await conn.execute("UPDATE users SET is_admin = TRUE WHERE id = $1", existing["id"])
+                logging.info("Admin flag set for %s", ADMIN_EMAIL)
+                return
+            if len(ADMIN_PASSWORD) < 6:
+                logging.warning("ADMIN_PASSWORD is missing; create the admin user later via SQL or env")
+                return
+            try:
+                await create_user_with_profile(
+                    conn,
+                    ADMIN_EMAIL,
+                    ADMIN_PASSWORD,
+                    username_from_email(ADMIN_EMAIL),
+                    is_admin=True,
+                )
+                logging.info("Created admin user %s", ADMIN_EMAIL)
+            except asyncpg.UniqueViolationError:
+                await conn.execute("UPDATE users SET is_admin = TRUE WHERE email = $1", ADMIN_EMAIL)
+
+
+def row_to_admin_user(row: asyncpg.Record) -> AdminUserOut:
+    keys = set(row.keys())
+    return AdminUserOut(
+        id=row["id"],
+        email=row["email"],
+        username=row["username"] if "username" in keys else None,
+        is_admin=user_is_admin(row),
+        created_at=row["created_at"],
+    )
+
+
 @app.get("/docs", include_in_schema=False)
-async def custom_docs():
+async def custom_docs(_: None = Depends(require_docs_auth)):
     html = get_swagger_ui_html(
         openapi_url="/openapi.json",
         title="SBP Donations API",
     ).body.decode()
     extra = '<script src="/js/swagger-i18n.js"></script></body>'
     return HTMLResponse(html.replace("</body>", extra))
+
+
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc(_: None = Depends(require_docs_auth)):
+    return get_redoc_html(openapi_url="/openapi.json", title="SBP Donations API")
+
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi_json(_: None = Depends(require_docs_auth)):
+    return JSONResponse(app.openapi())
 
 
 @app.get("/health", summary="Проверка сервера")
@@ -719,31 +890,32 @@ async def health_db():
     return {"status": "ok", "database": "connected", "check": value}
 
 
-@app.post("/api/auth/register", status_code=201, summary="Регистрация")
-async def register(request: Request, body: AuthRequest) -> AuthResponse:
+@app.post("/api/auth/register", status_code=201, summary="Регистрация (только администратор)")
+async def register(
+    request: Request,
+    body: AuthRequest,
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+) -> AuthResponse:
+    admin = False
+    if creds:
+        try:
+            payload = jwt.decode(creds.credentials, JWT_SECRET, algorithms=[JWT_ALG])
+            row = await pool.fetchrow(
+                "SELECT id, email, is_admin FROM users WHERE id = $1",
+                UUID(payload["sub"]),
+            )
+            admin = user_is_admin(row)
+        except Exception:
+            admin = False
+    if not admin:
+        raise HTTPException(status_code=403, detail="Public registration is disabled")
     email = str(body.email).lower()
-    password_hash = hash_password(body.password)
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                user = await conn.fetchrow(
-                    """
-                    INSERT INTO users (email, password_hash, email_verified)
-                    VALUES ($1, $2, TRUE)
-                    RETURNING id, email
-                    """,
-                    email,
-                    password_hash,
-                )
-                username = await unique_username(conn, username_from_email(email))
-                await conn.execute(
-                    """
-                    INSERT INTO profiles (id, username, display_name)
-                    VALUES ($1, $2, $2)
-                    """,
-                    user["id"],
-                    username,
-                )
+                user, username = await create_user_with_profile(conn, email, body.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=msg(request, str(exc))) from exc
     except asyncpg.UniqueViolationError as exc:
         raise HTTPException(status_code=409, detail=msg(request, "email_taken")) from exc
     except asyncpg.PostgresError as exc:
@@ -756,6 +928,91 @@ async def register(request: Request, body: AuthRequest) -> AuthResponse:
         email=user["email"],
         username=username,
     )
+
+
+@app.get("/api/admin/users", summary="Список пользователей", tags=["admin"])
+async def admin_list_users(_admin: asyncpg.Record = Depends(current_admin)) -> list[AdminUserOut]:
+    rows = await pool.fetch(
+        """
+        SELECT u.id, u.email, u.is_admin, u.created_at, p.username
+        FROM users u
+        LEFT JOIN profiles p ON p.id = u.id
+        ORDER BY u.created_at DESC
+        """
+    )
+    return [row_to_admin_user(row) for row in rows]
+
+
+@app.post("/api/admin/users", status_code=201, summary="Создать пользователя", tags=["admin"])
+async def admin_create_user(
+    request: Request,
+    body: AdminUserCreate,
+    _admin: asyncpg.Record = Depends(current_admin),
+) -> AdminUserOut:
+    email = str(body.email).lower()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                user, username = await create_user_with_profile(
+                    conn,
+                    email,
+                    body.password,
+                    body.username,
+                    is_admin=False,
+                )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=msg(request, str(exc))) from exc
+    except asyncpg.UniqueViolationError as exc:
+        raise HTTPException(status_code=409, detail=msg(request, "email_taken")) from exc
+    except asyncpg.PostgresError as exc:
+        logging.exception("Admin create user failed")
+        raise HTTPException(status_code=500, detail=f"{msg(request, 'db_error')}: {exc}") from exc
+    return AdminUserOut(
+        id=user["id"],
+        email=user["email"],
+        username=username,
+        is_admin=bool(user["is_admin"]),
+        created_at=user["created_at"],
+    )
+
+
+@app.delete("/api/admin/users/{user_id}", summary="Удалить пользователя", tags=["admin"])
+async def admin_delete_user(
+    request: Request,
+    user_id: UUID,
+    admin: asyncpg.Record = Depends(current_admin),
+) -> dict:
+    if user_id == admin["id"]:
+        raise HTTPException(status_code=400, detail=msg(request, "admin_self"))
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM profiles WHERE id = $1", user_id)
+            result = await conn.execute("DELETE FROM users WHERE id = $1", user_id)
+    if result.endswith("0"):
+        raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
+    return {"ok": True}
+
+
+@app.post("/api/admin/users/{user_id}/reset-password", summary="Сбросить пароль", tags=["admin"])
+async def admin_reset_password(
+    request: Request,
+    user_id: UUID,
+    body: AdminPasswordReset,
+    _admin: asyncpg.Record = Depends(current_admin),
+) -> dict:
+    updated = await pool.fetchval(
+        """
+        UPDATE users
+        SET password_hash = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id
+        """,
+        user_id,
+        hash_password(body.password),
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail=msg(request, "no_profile"))
+    return {"ok": True}
 
 
 @app.post("/api/auth/login", summary="Вход")
