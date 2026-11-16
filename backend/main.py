@@ -426,7 +426,11 @@ async def validation_handler(request: Request, _exc: RequestValidationError):
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
 
 
 @app.exception_handler(Exception)
@@ -739,7 +743,7 @@ async def current_admin(
     return user
 
 
-docs_basic = HTTPBasic(auto_error=False)
+docs_basic = HTTPBasic(auto_error=False, realm="API docs")
 optional_bearer = HTTPBearer(auto_error=False)
 
 
@@ -756,15 +760,16 @@ def _basic_ok(got: str, expected: str) -> bool:
 
 async def require_docs_auth(
     creds: Optional[HTTPBasicCredentials] = Depends(docs_basic),
-) -> None:
+) -> HTTPBasicCredentials:
     if not docs_enabled():
         raise HTTPException(status_code=404, detail="Not Found")
     if creds is None or not (_basic_ok(creds.username, DOCS_USER) and _basic_ok(creds.password, DOCS_PASSWORD)):
         raise HTTPException(
             status_code=401,
             detail="Not authenticated",
-            headers={"WWW-Authenticate": "Basic"},
+            headers={"WWW-Authenticate": 'Basic realm="API docs"'},
         )
+    return creds
 
 
 def normalize_username(raw: str) -> str:
