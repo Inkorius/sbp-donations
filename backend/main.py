@@ -734,15 +734,6 @@ def user_is_admin(row: Optional[asyncpg.Record]) -> bool:
     return bool(ADMIN_EMAIL and str(row["email"]).lower() == ADMIN_EMAIL)
 
 
-async def current_admin(
-    request: Request,
-    user: asyncpg.Record = Depends(current_user),
-) -> asyncpg.Record:
-    if not user_is_admin(user):
-        raise HTTPException(status_code=403, detail=msg(request, "admin_only"))
-    return user
-
-
 docs_basic = HTTPBasic(auto_error=False, realm="API docs")
 optional_bearer = HTTPBearer(auto_error=False)
 
@@ -756,6 +747,70 @@ def _basic_ok(got: str, expected: str) -> bool:
         return secrets.compare_digest(got.encode("utf-8"), expected.encode("utf-8"))
     except Exception:
         return False
+
+
+async def fetch_admin_actor() -> Optional[asyncpg.Record]:
+    if ADMIN_EMAIL:
+        row = await pool.fetchrow(
+            """
+            SELECT u.id, u.email, u.email_verified, u.is_admin, u.created_at, p.username
+            FROM users u
+            LEFT JOIN profiles p ON p.id = u.id
+            WHERE lower(u.email) = $1
+            """,
+            ADMIN_EMAIL,
+        )
+        if row:
+            return row
+    return await pool.fetchrow(
+        """
+        SELECT u.id, u.email, u.email_verified, u.is_admin, u.created_at, p.username
+        FROM users u
+        LEFT JOIN profiles p ON p.id = u.id
+        WHERE u.is_admin IS TRUE
+        ORDER BY u.created_at
+        LIMIT 1
+        """
+    )
+
+
+async def current_admin(
+    request: Request,
+    bearer: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer),
+    basic: Optional[HTTPBasicCredentials] = Depends(docs_basic),
+) -> asyncpg.Record:
+    if (
+        basic is not None
+        and docs_enabled()
+        and _basic_ok(basic.username, DOCS_USER)
+        and _basic_ok(basic.password, DOCS_PASSWORD)
+    ):
+        actor = await fetch_admin_actor()
+        if actor:
+            return actor
+        raise HTTPException(status_code=403, detail=msg(request, "admin_only"))
+
+    if bearer is not None:
+        try:
+            payload = jwt.decode(bearer.credentials, JWT_SECRET, algorithms=[JWT_ALG])
+            user = await pool.fetchrow(
+                """
+                SELECT u.id, u.email, u.email_verified, u.is_admin, u.created_at, p.username
+                FROM users u
+                LEFT JOIN profiles p ON p.id = u.id
+                WHERE u.id = $1
+                """,
+                UUID(payload["sub"]),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=401, detail=msg(request, "bad_token")) from exc
+        if not user:
+            raise HTTPException(status_code=401, detail=msg(request, "bad_token"))
+        if not user_is_admin(user):
+            raise HTTPException(status_code=403, detail=msg(request, "admin_only"))
+        return user
+
+    raise HTTPException(status_code=401, detail=msg(request, "bad_token"))
 
 
 async def require_docs_auth(
